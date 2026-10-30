@@ -57,3 +57,15 @@ def test_protected_namespaces_never_writable():
     assert not settings.namespace_writable("shared")
     assert not settings.namespace_writable("system")
     assert not settings.namespace_writable("other")
+
+
+def test_non_loopback_bind_needs_flag_http_and_host_allowlist():
+    base = {"bind_host": "0.0.0.0", "transport": Transport.STREAMABLE_HTTP, "api_token": None}
+    with pytest.raises(ValidationError):
+        make_settings(**base, allowed_hosts=("mcp.example.com",))
+    with pytest.raises(ValidationError):
+        make_settings(**base, allow_non_loopback_bind=True)
+    with pytest.raises(ValidationError):
+        make_settings(bind_host="0.0.0.0", allow_non_loopback_bind=True, allowed_hosts=("mcp.example.com",))
+    settings = make_settings(**base, allow_non_loopback_bind=True, allowed_hosts=("mcp.example.com",))
+    assert settings.bind_host == "0.0.0.0"

@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     api_token: Annotated[SecretStr | None, Field(validation_alias="F5XC_API_TOKEN")] = None
 
     bind_host: Annotated[str, Field(validation_alias="F5XC_MCP_BIND_HOST")] = "127.0.0.1"
+    # Containers: binding outside loopback needs this flag AND an explicit Host allow-list.
+    allow_non_loopback_bind: Annotated[bool, Field(validation_alias="F5XC_MCP_ALLOW_NON_LOOPBACK_BIND")] = False
     bind_port: Annotated[int, Field(ge=1024, le=65535, validation_alias="F5XC_MCP_BIND_PORT")] = 8765
     allowed_hosts: Annotated[tuple[str, ...], NoDecode, Field(validation_alias="F5XC_MCP_ALLOWED_HOSTS")] = ()
     allowed_origins: Annotated[tuple[str, ...], NoDecode, Field(validation_alias="F5XC_MCP_ALLOWED_ORIGINS")] = ()
@@ -86,6 +88,14 @@ class Settings(BaseSettings):
     loop_threshold: Annotated[int, Field(ge=2, le=100, validation_alias="F5XC_MCP_LOOP_THRESHOLD")] = 5
 
     plan_ttl_s: Annotated[int, Field(ge=30, le=900, validation_alias="F5XC_MCP_PLAN_TTL_S")] = 300
+    min_ipv4_prefix_len: Annotated[int, Field(ge=8, le=32, validation_alias="F5XC_MCP_MIN_IPV4_PREFIX_LEN")] = 16
+
+    # Identity: tokens are validated against XC (whoami) before any quota is used.
+    identity_cache_ttl_s: Annotated[int, Field(ge=30, le=900, validation_alias="F5XC_MCP_IDENTITY_CACHE_TTL_S")] = 300
+    auth_rate_per_minute: Annotated[int, Field(ge=1, le=600, validation_alias="F5XC_MCP_AUTH_RATE_PER_MINUTE")] = 30
+    allow_service_credentials: Annotated[
+        bool, Field(validation_alias="F5XC_MCP_ALLOW_SERVICE_CREDENTIALS")
+    ] = False
     audit_path: Annotated[str | None, Field(validation_alias="F5XC_MCP_AUDIT_LOG")] = None
 
     @field_validator("allowed_namespaces", "allowed_hosts", "allowed_origins", mode="before")
@@ -119,10 +129,7 @@ class Settings(BaseSettings):
             address = ipaddress.ip_address(value)
         except ValueError as exc:
             raise ValueError("bind host must be an IP address") from exc
-        if not address.is_loopback:
-            # TLS and client exposure belong to a reverse proxy in front.
-            raise ValueError("bind host must be a loopback address; put a TLS reverse proxy in front")
-        return value
+        return str(address)
 
     @field_validator("api_token")
     @classmethod
@@ -137,6 +144,12 @@ class Settings(BaseSettings):
             raise ValueError("F5XC_MCP_MODE=write also requires F5XC_MCP_ENABLE_WRITES=true")
         if self.transport is Transport.STDIO and self.api_token is None:
             raise ValueError("stdio transport requires F5XC_API_TOKEN (your personal API token)")
+        if not ipaddress.ip_address(self.bind_host).is_loopback:
+            # TLS and client exposure belong to a reverse proxy in front.
+            if not self.allow_non_loopback_bind:
+                raise ValueError("bind host must be loopback unless F5XC_MCP_ALLOW_NON_LOOPBACK_BIND=true")
+            if self.transport is not Transport.STREAMABLE_HTTP or not self.allowed_hosts:
+                raise ValueError("a non-loopback bind requires HTTP transport and F5XC_MCP_ALLOWED_HOSTS")
         if self.transport is Transport.STREAMABLE_HTTP and self.api_token is not None:
             raise ValueError(
                 "F5XC_API_TOKEN must not be set in HTTP mode: each caller sends its own token "

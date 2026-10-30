@@ -5,9 +5,13 @@ load balancers, le WAF, les policies, le bot defense, la sécurité des API, les
 events et les logs. Il est sécurisé par conception :
 
 - **lecture seule par défaut** ;
-- les écritures passent par un **plan** (diff calculé côté serveur), puis une
-  **confirmation humaine** (MCP elicitation), puis l'**application** ;
-- **aucune suppression** et **aucun outil de requête générique**.
+- les écritures passent par un **plan** (diff exhaustif calculé côté serveur), puis une
+  **confirmation humaine** qui affiche ce diff complet et le hash du corps envoyé
+  (MCP elicitation), puis l'**application** ;
+- **aucune suppression**, **aucun remplacement générique** et **aucun outil de requête
+  générique** ;
+- l'**identité est nominative** : chaque token est résolu en utilisateur XC (`whoami`)
+  avant tout appel.
 
 Les endpoints viennent de la référence API officielle (`data/catalog.json`, généré par
 `scripts/generate_catalog.py` à partir des spécifications OpenAPI publiées sur
@@ -45,18 +49,41 @@ docs.cloud.f5.com).
 | `plan_set_waf_mode` | Passer un WAF en blocking ou en monitoring |
 | `plan_update_ip_prefix_set` | Ajouter ou retirer des IP d'une liste (blocage, allowlist) |
 | `plan_add_waf_exclusion_rule` | Ajouter une exclusion WAF (faux positif). Les règles qui désactivent tout le WAF sont refusées |
-| `plan_replace_object`, `plan_create_object` | Remplacer la spec ou créer un objet d'un type modifiable ; les champs de premier niveau sont vérifiés contre la doc |
-| `apply_plan(plan_id)` | Applique un plan après confirmation : l'utilisateur doit retaper le nom de l'objet |
+| `plan_create_object` | Créer un objet sans effet tant qu'il n'est pas référencé : App Firewall, service policy, ip_prefix_set, rate limiter, WAF exclusion policy, health check |
+| `apply_plan(plan_id)` | Applique un plan après confirmation humaine |
 
-Un plan est à usage unique, lié à l'identité qui l'a créé, et expire après 5 minutes.
-Il est refusé si l'objet a changé entre le plan et l'application. Les namespaces
-`system` et `shared` ne sont jamais modifiés.
+### Ce que voit la personne qui confirme
+
+Le message d'élicitation est construit par le serveur, pas par le modèle. Il contient :
+
+- un bandeau `!!! HIGH RISK !!!` avec les raisons quand le changement baisse la
+  protection : WAF désactivé ou passé en monitoring, WAF attaché en monitoring,
+  bot / IP reputation / rate limit désactivés, trusted clients modifiés, exclusion de
+  toutes les signatures, modification d'un `ip_prefix_set` (qui peut servir d'allowlist) ;
+- la cible, la requête (`PUT /api/config/...`) et le **SHA-256 du corps** envoyé ;
+- le **diff complet**, feuille par feuille. Les règles nommées sont appariées par nom et
+  un changement d'ordre est signalé. Les valeurs sont échappées en JSON (caractères de
+  contrôle ou invisibles visibles), jamais tronquées.
+
+Pour confirmer, il faut retaper le nom de l'objet. En cas de HIGH RISK, il faut aussi
+retaper les 8 premiers caractères du hash.
+
+Un diff qui ne peut pas être montré en entier est refusé au moment du plan : plus de 80
+champs, une valeur de plus de 300 caractères ou plus de 8 000 caractères au total. Il
+faut alors découper le changement. Un changement qui touche un champ secret (clé
+privée, mot de passe, token...) est refusé.
+
+Un plan est à usage unique, lié à l'utilisateur XC qui l'a créé, et expire après
+5 minutes. Il est refusé si l'objet a changé entre le plan et l'application. Les
+namespaces `system` et `shared` ne sont jamais modifiés.
 
 ## Installation
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
+pip install --require-hashes -r requirements-dev.lock
+pip install --require-hashes -r requirements-build.lock
+pip install --no-deps --no-build-isolation .
 pytest
 ```
 
@@ -70,19 +97,34 @@ pytest
 | `F5XC_MCP_MODE` | `read` | `read` ou `write` |
 | `F5XC_MCP_ENABLE_WRITES` | `false` | Doit aussi valoir `true` pour activer l'écriture |
 | `F5XC_MCP_TRANSPORT` | `stdio` | `stdio` ou `streamable-http` |
-| `F5XC_MCP_BIND_HOST` / `_PORT` | `127.0.0.1` / `8765` | Loopback uniquement (mettre un reverse proxy TLS devant) |
+| `F5XC_MCP_BIND_HOST` / `_PORT` | `127.0.0.1` / `8765` | Loopback par défaut (reverse proxy TLS devant) |
+| `F5XC_MCP_ALLOW_NON_LOOPBACK_BIND` | `false` | Autorise un bind hors loopback (conteneur). Exige le mode HTTP et `F5XC_MCP_ALLOWED_HOSTS` |
 | `F5XC_MCP_ALLOWED_HOSTS` / `_ORIGINS` | localhost | Valeurs `Host` et `Origin` acceptées (anti DNS rebinding) |
 | `F5XC_MCP_CA_BUNDLE` | — | CA supplémentaire (proxy d'entreprise) ; la vérification TLS ne peut pas être désactivée |
 | `F5XC_MCP_RATE_PER_MINUTE` / `_GLOBAL_RATE_PER_MINUTE` | 60 / 300 | Limites de débit |
 | `F5XC_MCP_MAX_EVENTS`, `_MAX_ITEMS`, `_MAX_QUERY_WINDOW_H` | 100, 200, 168 | Bornes des réponses |
 | `F5XC_MCP_PLAN_TTL_S` | 300 | Durée de vie d'un plan |
-| `F5XC_MCP_AUDIT_LOG` | stderr | Fichier du journal d'audit JSON |
+| `F5XC_MCP_MIN_IPV4_PREFIX_LEN` | 16 | Préfixe minimum accepté dans un `ip_prefix_set` (`/0`, `/8`... refusés) |
+| `F5XC_MCP_IDENTITY_CACHE_TTL_S` | 300 | Cache de la résolution token → utilisateur |
+| `F5XC_MCP_AUTH_RATE_PER_MINUTE` | 30 | Validations de tokens inconnus par minute (tous clients confondus) |
+| `F5XC_MCP_ALLOW_SERVICE_CREDENTIALS` | `false` | Accepte les service credentials (comptes non nominatifs) |
+| `F5XC_MCP_AUDIT_LOG` | stderr | Fichier du journal d'audit JSON (créé en `0600`, compatible logrotate) |
 
-### Token et droits
+### Token, identité et droits
 
-Crée un **token API personnel** dans la console XC (Account > Credentials). Les droits
-du serveur sont ceux de ton rôle XC : commence avec un rôle en lecture sur les
-namespaces concernés, et ne passe à un rôle d'écriture que pour le mode write.
+Crée un **token API personnel** dans la console XC (Account > Credentials). Le serveur
+le résout en utilisateur avec `GET /api/web/custom/namespaces/system/whoami` avant tout
+autre appel :
+
+- l'audit et les quotas utilisent le nom, l'e-mail et l'UUID XC, pas le token ;
+- une rotation de token ne change donc pas l'identité ;
+- un token refusé par XC est mis en cache négatif 60 s et ne consomme aucun quota ;
+- les validations de tokens inconnus sont limitées globalement ;
+- les service credentials sont refusées par défaut.
+
+Les droits du serveur sont ceux de ton rôle XC : commence avec un rôle en lecture sur
+les namespaces concernés, et ne passe à un rôle d'écriture que pour le mode write.
+Le journal d'audit XC (`query_audit_logs`) reste le contrôle compensatoire, côté F5.
 
 ### Claude Code (stdio)
 
@@ -112,7 +154,56 @@ f5xc-waap-mcp
 ```
 
 Chaque client envoie son propre token dans l'en-tête `X-F5XC-API-Token`. Le serveur
-n'a pas de token à lui. Termine le TLS sur un reverse proxy devant `127.0.0.1:8765`.
+n'a pas de token à lui. Termine le TLS sur un reverse proxy devant `127.0.0.1:8765`,
+et **limite le débit par IP sur ce proxy** : le serveur limite les validations de
+tokens inconnus, mais il ne voit que l'IP du proxy.
+
+### Conteneur
+
+L'image est construite à partir d'une base épinglée par digest. Les dépendances sont
+vérifiées par hash, et elle tourne en utilisateur non-root (UID 65532) sans outil de
+build.
+
+```bash
+docker build -t f5xc-waap-mcp .
+```
+
+Deux façons de l'exposer :
+
+- **proxy dans le même namespace réseau** (sidecar dans un pod, ou
+  `--network container:<proxy>`) : le serveur reste en `127.0.0.1`, sans configuration
+  de plus ;
+- **bind explicite**, quand le proxy est ailleurs :
+
+```bash
+docker run --read-only --cap-drop=ALL --security-opt no-new-privileges \
+  -p 127.0.0.1:8765:8765 \
+  -e F5XC_TENANT=acme-corp -e F5XC_ALLOWED_NAMESPACES=prod \
+  -e F5XC_MCP_BIND_HOST=0.0.0.0 -e F5XC_MCP_ALLOW_NON_LOOPBACK_BIND=true \
+  -e F5XC_MCP_ALLOWED_HOSTS=mcp.example.com \
+  f5xc-waap-mcp
+```
+
+### Journal d'audit et Splunk
+
+Événements `tool_call`, `plan_created`, `plan_confirmation` et `plan_applied`, reliés
+par `plan_id` et `request_id`, avec l'utilisateur XC nominatif. Pour Splunk :
+
+- sur un hôte, `F5XC_MCP_AUDIT_LOG=/var/log/f5xc-waap-mcp/audit.jsonl` et un Universal
+  Forwarder (`[monitor:///var/log/f5xc-waap-mcp/audit.jsonl]`, `sourcetype = _json`).
+  Le fichier est créé en `0600` et rouvert après une rotation logrotate ;
+- en conteneur, garder stderr et utiliser le logging driver `splunk` (ou le collecteur
+  de logs du cluster).
+
+## Dépendances et chaîne d'approvisionnement
+
+- **Verrous :** `requirements*.lock` épinglent chaque paquet, transitifs compris, avec
+  leurs hashes. Ils sont régénérés par `scripts/lock.sh` avec un délai de 14 jours sur
+  les nouvelles versions ; les exceptions de sécurité sont listées dans le script.
+- **CI :** actions épinglées par SHA, installations `--require-hashes`, ruff, bandit,
+  pip-audit sur les trois verrous (et une fois par semaine), SBOM CycloneDX en
+  artefact, construction et test de l'image (non-root, système de fichiers en lecture
+  seule).
 
 ## Mettre à jour le catalogue
 

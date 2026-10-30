@@ -30,6 +30,12 @@
    "operation": "ves.io.schema.views.http_loadbalancer.CustomAPI.GetDoSAutoMitigationRules",
    "path": "/api/config/namespaces/{namespace}/http_loadbalancers/{name}/dos_automitigation_rules"
   },
+  "identity.whoami": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/user",
+   "method": "GET",
+   "operation": "ves.io.schema.user.CustomAPI.Get",
+   "path": "/api/web/custom/namespaces/{namespace}/whoami"
+  },
   "namespace.active_service_policies": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/namespace",
    "method": "GET",

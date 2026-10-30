@@ -29,7 +29,7 @@ MAX_LIST = 100
 MAX_DEPTH = 12
 REDACTED = "[redacted]"
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f​-‏  ﻿]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]")
 _SECRET_KEY = re.compile(
     r"(?i)(private_key|password|passwd|secret|token|api_?key|client_secret|hmac|credential|"
     r"clear_secret_info|blindfold_secret_info|vault_secret_info|wingman_secret_info|pkcs12|"

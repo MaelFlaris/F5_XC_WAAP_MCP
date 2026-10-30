@@ -26,6 +26,7 @@ def scrub(text: str, limit: int = 200) -> str:
 
 class Code(StrEnum):
     UNAUTHENTICATED = "unauthenticated"
+    AUTH_RATE_LIMITED = "auth_rate_limited"
     NAMESPACE_FORBIDDEN = "namespace_forbidden"
     NAMESPACE_PROTECTED = "namespace_protected"
     KIND_NOT_WRITABLE = "kind_not_writable"
@@ -44,6 +45,8 @@ class Code(StrEnum):
     UPSTREAM_REDIRECT = "upstream_redirect_refused"
     RESPONSE_TOO_LARGE = "response_too_large"
     RESPONSE_INVALID = "response_invalid"
+    DIFF_TOO_LARGE = "diff_too_large"
+    SECRET_FIELD = "secret_field_refused"  # noqa: S105 - error code, not a secret
     PLAN_UNKNOWN = "plan_unknown_or_expired"
     PLAN_USER_MISMATCH = "plan_user_mismatch"
     PLAN_STALE = "plan_stale"
@@ -53,6 +56,7 @@ class Code(StrEnum):
 
 MESSAGES: dict[Code, str] = {
     Code.UNAUTHENTICATED: "No usable F5 XC credential for this request.",
+    Code.AUTH_RATE_LIMITED: "Too many token validations, retry later.",
     Code.NAMESPACE_FORBIDDEN: "Namespace is not in the server allow-list.",
     Code.NAMESPACE_PROTECTED: "Namespace is protected and cannot be modified through this server.",
     Code.KIND_NOT_WRITABLE: "This object kind is read-only in this server.",
@@ -71,6 +75,8 @@ MESSAGES: dict[Code, str] = {
     Code.UPSTREAM_REDIRECT: "Redirect refused by security policy.",
     Code.RESPONSE_TOO_LARGE: "F5 XC response exceeds the configured size limit.",
     Code.RESPONSE_INVALID: "F5 XC response could not be parsed.",
+    Code.DIFF_TOO_LARGE: "The change is too large to be reviewed in full; split it into smaller changes.",
+    Code.SECRET_FIELD: "Changes touching secret fields are refused by this server.",
     Code.PLAN_UNKNOWN: "Unknown, expired or already used plan id.",
     Code.PLAN_USER_MISMATCH: "This plan was created by another identity.",
     Code.PLAN_STALE: "The object changed since the plan was created; create a new plan.",

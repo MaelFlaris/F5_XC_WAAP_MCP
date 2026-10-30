@@ -37,20 +37,20 @@ async def test_list_objects_calls_documented_path(harness, xc):
     data = result_json(await harness.call("list_objects", {"kind": "app_firewall", "namespace": "prod"}))
     assert data["data"][0]["name"] == "fw1"
     assert data["untrusted_content"] is True
-    assert xc.requests[0].headers["authorization"] == f"APIToken {TOKEN}"
+    assert xc.api_requests[0].headers["authorization"] == f"APIToken {TOKEN}"
 
 
 async def test_namespace_outside_allowlist_is_refused_before_any_call(harness, xc):
     result = await harness.call("list_objects", {"kind": "app_firewall", "namespace": "finance"})
     assert "namespace_forbidden" in error_text(result)
-    assert xc.requests == []
+    assert xc.api_requests == []
 
 
 async def test_unknown_kind_and_bad_names_are_rejected_by_schema(harness, xc):
     assert (await harness.call("list_objects", {"kind": "user", "namespace": "prod"})).isError
     assert (await harness.call("get_object", {"kind": "origin_pool", "namespace": "prod",
                                               "name": "../../system"})).isError
-    assert xc.requests == []
+    assert xc.api_requests == []
 
 
 async def test_get_object_summary_reports_oneof_choices(harness, xc):
@@ -83,7 +83,7 @@ async def test_spec_view_refused_for_sensitive_kinds(harness, xc):
     result = await harness.call("get_object", {"kind": "certificate", "namespace": "prod", "name": "c",
                                                "view": "spec"})
     assert "sensitive_kind" in error_text(result)
-    assert xc.requests == []
+    assert xc.api_requests == []
 
 
 async def test_lb_posture_findings(harness, xc):
@@ -147,7 +147,7 @@ async def test_filter_values_cannot_break_out_of_the_query(harness, xc):
         assert result.isError
     assert (await harness.call("query_security_events", {
         "namespace": "prod", "filters": [{"field": "password", "value": "x"}]})).isError
-    assert xc.requests == []
+    assert xc.api_requests == []
 
 
 async def test_time_window_is_bounded(harness, xc):
@@ -195,7 +195,7 @@ async def test_redirects_are_not_followed(harness, xc):
     text = error_text(await harness.call("get_object", {"kind": "http_loadbalancer", "namespace": "prod",
                                                         "name": "shop"}))
     assert "redirect" in text
-    assert len(xc.requests) == 1
+    assert len(xc.api_requests) == 1
 
 
 async def test_response_size_cap(xc):

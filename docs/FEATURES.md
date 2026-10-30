@@ -9,7 +9,7 @@ deviné.
 Légende :
 
 - **L** : lecture (outils `list_objects` / `get_object` ou outil dédié) ;
-- **É** : écriture possible via plan → confirmation humaine → apply (mode write uniquement) ;
+- **É** : écriture via plan → confirmation humaine → apply (mode write uniquement). « É (outil) » = modification ciblée ; « É (création) » = création d'un objet neuf seulement ;
 - **—** : pas couvert pour l'instant (feuille de route) ;
 - **🔒** : peut contenir des secrets, seule la vue résumé est disponible.
 
@@ -17,12 +17,12 @@ Légende :
 
 | Fonctionnalité XC | Objet API | Couverture |
 |---|---|---|
-| HTTP/HTTPS Load Balancer (domaines, TLS auto-cert, routes, pools, publication) | `views.http_loadbalancer` | L, É, posture sécurité, infos DNS |
-| TCP Load Balancer | `views.tcp_loadbalancer` | L, É |
-| CDN Load Balancer | `views.cdn_loadbalancer` | L, É |
+| HTTP/HTTPS Load Balancer (domaines, TLS auto-cert, routes, pools, publication) | `views.http_loadbalancer` | L, posture sécurité, infos DNS ; É (outil) : WAF attaché, exclusions WAF |
+| TCP Load Balancer | `views.tcp_loadbalancer` | L |
+| CDN Load Balancer | `views.cdn_loadbalancer` | L |
 | UDP Load Balancer | `views.udp_loadbalancer` | — |
-| Origin pools (serveurs d'origine, TLS vers l'origine, algorithme) | `views.origin_pool` | L, É |
-| Health checks | `healthcheck` | L, É |
+| Origin pools (serveurs d'origine, TLS vers l'origine, algorithme) | `views.origin_pool` | L |
+| Health checks | `healthcheck` | L, É (création) |
 | Certificats TLS, chaînes, listes de CA | `certificate`, `trusted_ca_list` | L 🔒 / L |
 | Purge de cache CDN | `cdn_loadbalancer/.../cache-purge` | — (action destructive) |
 | Virtual hosts (objets bas niveau) | `virtual_host` | — |
@@ -31,9 +31,9 @@ Légende :
 
 | Fonctionnalité XC | Objet / API | Couverture |
 |---|---|---|
-| App Firewall : mode blocking / monitoring, signatures, violations, bot setting, IA, anonymisation | `app_firewall` | L, É, `plan_set_waf_mode` |
+| App Firewall : mode blocking / monitoring, signatures, violations, bot setting, IA, anonymisation | `app_firewall` | L, É (outil) `plan_set_waf_mode`, É (création) |
 | Attacher / détacher un WAF à un LB | champ `waf_choice` du LB | `plan_set_lb_waf` |
-| Exclusions WAF (faux positifs) inline ou en policy | `waf_exclusion` du LB, `waf_exclusion_policy` | L, É, `suggest_waf_exclusion_rule` + `plan_add_waf_exclusion_rule` |
+| Exclusions WAF (faux positifs) inline ou en policy | `waf_exclusion` du LB, `waf_exclusion_policy` | L, `suggest_waf_exclusion_rule` ; É (outil) `plan_add_waf_exclusion_rule` (règles inline) ; É (création) pour une policy |
 | Version des signatures d'attaque | `/api/waf/latest-signatures-version` | L |
 | Signatures staged / released par virtual host, threat campaigns | `waf_signatures_changelog` | — |
 | Métriques de hits WAF (règles, events) | `wafs/metrics/...` | — |
@@ -42,11 +42,11 @@ Légende :
 
 | Fonctionnalité XC | Objet API | Couverture |
 |---|---|---|
-| Service policies (allow/deny par IP, pays, ASN, en-têtes, chemins...) | `service_policy` | L, É |
+| Service policies (allow/deny par IP, pays, ASN, en-têtes, chemins...) | `service_policy` | L, É (création) |
 | Service policies actives au niveau namespace | `active_service_policies` | L |
 | Règles legacy de service policy | `service_policy_rule` | L |
-| Rate limiter policies et rate limiters | `views.rate_limiter_policy`, `rate_limiter` | L, É |
-| Listes d'IP (blocklist / allowlist) | `ip_prefix_set` | L, É, `plan_update_ip_prefix_set` |
+| Rate limiter policies et rate limiters | `views.rate_limiter_policy`, `rate_limiter` | L, É (création) |
+| Listes d'IP (blocklist / allowlist) | `ip_prefix_set` | L, É (outil) `plan_update_ip_prefix_set`, É (création) |
 | Forward proxy policies, policers | `views.forward_proxy_policy`, `policer`, `protocol_policer` | L |
 | Network firewall, enhanced firewall, Fast ACL (sites CE) | `network_firewall`, `enhanced_firewall_policy`, `fast_acl` | L |
 
@@ -54,25 +54,25 @@ Légende :
 
 | Fonctionnalité XC | Objet API | Couverture |
 |---|---|---|
-| Bot defense standard du LB (activée / désactivée) | `bot_defense_choice` du LB | L (posture), É via spec |
+| Bot defense standard du LB (activée / désactivée) | `bot_defense_choice` du LB | L (posture) |
 | Infrastructure Bot Defense avancée | `views.bot_defense_app_infrastructure` | L |
 | Bot Defense avancé (Shape) : protected apps, allowlists, endpoints | `shape_bot_defense_*` | — |
-| Détection d'utilisateurs malveillants, identification, mitigation | `malicious_user_mitigation`, `user_identification`, `app_setting`, `app_type` | L, É |
+| Détection d'utilisateurs malveillants, identification, mitigation | `malicious_user_mitigation`, `user_identification`, `app_setting`, `app_type` | L |
 | Logs d'utilisateurs suspects | `app_security/suspicious_user_logs` | L (`query_suspicious_users`) |
 | Client-side defense (Shape) | `shape_client_side_defense_*` | — (posture LB seulement) |
-| IP reputation, threat mesh, challenges JS/captcha | champs du LB | L (posture), É via spec |
+| IP reputation, threat mesh, challenges JS/captcha | champs du LB | L (posture) |
 
 ## 5. Sécurité des API
 
 | Fonctionnalité XC | Objet API | Couverture |
 |---|---|---|
-| Définitions d'API (OpenAPI), inventaire | `views.api_definition` | L, É |
-| Groupes d'API | `views.app_api_group` | L, É |
-| API discovery (configuration) | `api_discovery` | L, É |
+| Définitions d'API (OpenAPI), inventaire | `views.api_definition` | L |
+| Groupes d'API | `views.app_api_group` | L |
+| API discovery (configuration) | `api_discovery` | L |
 | API crawler, API testing | `api_crawler`, `api_testing` | L 🔒 |
-| Sensitive data policies, data types | `sensitive_data_policy`, `data_type` | L, É / L |
+| Sensitive data policies, data types | `sensitive_data_policy`, `data_type` | L |
 | Endpoints découverts, swagger appris, mises à jour de schéma | `/api/ml/data/.../api_endpoints` | — |
-| Validation OpenAPI, JWT, protection d'endpoints | champs du LB | L (posture / spec), É via spec |
+| Validation OpenAPI, JWT, protection d'endpoints | champs du LB | L (posture / spec) |
 
 ## 6. DDoS
 
@@ -108,4 +108,9 @@ Légende :
 - **Suppression** d'objets, de namespaces ou de sites. Aucun outil ne le permet, en aucun mode.
 - **Outil générique** de requête API (« raw request »). Seuls les chemins du catalogue fermé sont appelables.
 - **Écriture** dans les namespaces `system`, `shared` et `ves-io-shared`.
+- **Remplacement générique** de la spec d'un objet. Les écritures passent par des outils
+  ciblés (WAF d'un LB, mode du WAF, listes d'IP, exclusions WAF). La création est
+  limitée aux objets sans effet tant qu'ils ne sont pas référencés. Les autres
+  modifications (routes, origin pools, bot defense, API discovery...) sont en feuille de
+  route, chacune avec un outil dédié.
 - Objets d'administration du tenant (utilisateurs, rôles, credentials API, tenant management).

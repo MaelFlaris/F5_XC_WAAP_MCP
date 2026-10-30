@@ -21,6 +21,11 @@ from f5xc_waap_mcp.server import build_server
 from f5xc_waap_mcp.xc_client import XCClient
 
 TOKEN = "TestPersonalApiToken-0123456789abcdef"
+WHOAMI = "/api/web/custom/namespaces/system/whoami"
+USERS = {
+    TOKEN: {"name": "alice@example.com", "email": "alice@example.com", "user_uuid": "uuid-alice",
+            "type": "USER", "state": "StateActive"},
+}
 
 
 def make_settings(**overrides: Any) -> Settings:
@@ -41,6 +46,18 @@ class FakeXC:
     def __init__(self) -> None:
         self.routes: dict[tuple[str, str], Any] = {}
         self.requests: list[httpx.Request] = []
+        self.users = dict(USERS)
+        self.add("GET", WHOAMI, self._whoami)
+
+    def _whoami(self, request: httpx.Request) -> httpx.Response:
+        token = request.headers.get("authorization", "").removeprefix("APIToken ")
+        user = self.users.get(token)
+        return httpx.Response(200, json=user) if user else httpx.Response(401, json={"message": "unauthorized"})
+
+    @property
+    def api_requests(self) -> list[httpx.Request]:
+        """Requests other than identity resolution."""
+        return [r for r in self.requests if r.url.path != WHOAMI]
 
     def add(self, method: str, path: str, response: Any) -> None:
         self.routes[(method, path)] = response

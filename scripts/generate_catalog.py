@@ -85,6 +85,7 @@ KINDS: dict[str, tuple[str, str, bool, bool]] = {
 
 # Data / custom endpoints called by the server: id -> (doc slug, method, path)
 DATA_ENDPOINTS: dict[str, tuple[str, str, str]] = {
+    "identity.whoami": ("user", "get", "/api/web/custom/namespaces/{namespace}/whoami"),
     "namespace.list": ("namespace", "get", "/api/web/namespaces"),
     "namespace.active_service_policies": (
         "namespace", "get", "/api/config/namespaces/{namespace}/active_service_policies"),

@@ -1,7 +1,7 @@
 """Shared runtime: identity resolution, tool registration by class, and the
 single control chain every tool goes through:
 
-    identity -> guardrails -> tool body -> audit (success or failure)
+    identity (validated by XC) -> guardrails -> tool body -> audit (success or failure)
 
 Tools are registered with FastMCP only when their class is allowed by the
 configuration: in read mode, write tools do not exist in ``tools/list``.
@@ -13,6 +13,7 @@ import functools
 import inspect
 import secrets
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -23,10 +24,11 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import SecretStr
 
-from .audit import AuditLog, args_hash, pseudonym
+from .audit import AuditLog, args_hash
 from .config import API_TOKEN_RE, Settings, Transport
 from .errors import Code, SecureError
 from .guardrails import Guardrails
+from .identity import IdentityResolver, Principal
 from .plans import PlanStore
 from .xc_client import XCClient
 
@@ -40,12 +42,28 @@ class ToolClass(StrEnum):
 
 @dataclass(frozen=True)
 class Identity:
-    key: str  # pseudonymous, stable per token
+    principal: Principal
     token: SecretStr
     session: str
 
+    @property
+    def key(self) -> str:
+        return self.principal.key
+
 
 _current: ContextVar[Identity | None] = ContextVar("f5xc_identity", default=None)
+# Per-call audit context: request id, caller, and fields added by the tool body.
+_audit_ctx: ContextVar[dict[str, Any] | None] = ContextVar("f5xc_audit", default=None)
+_SESSION_ATTR = "_f5xc_session_id"
+
+
+def session_id(session: Any) -> str:
+    """Random id attached to the MCP session object (never reused, unlike id())."""
+    value = getattr(session, _SESSION_ATTR, None)
+    if value is None:
+        value = f"ses_{uuid.uuid4().hex}"
+        setattr(session, _SESSION_ATTR, value)
+    return value
 
 
 class Runtime:
@@ -55,23 +73,26 @@ class Runtime:
         self.guardrails = Guardrails(settings)
         self.audit = audit or AuditLog(settings.audit_path)
         self.plans = PlanStore(settings.plan_ttl_s)
+        self.identities = IdentityResolver(settings, self.client)
         self.registered: dict[str, ToolClass] = {}
 
     # -- identity ------------------------------------------------------------
-    def resolve_identity(self, ctx: Context) -> Identity:
-        session = f"s{id(ctx.request_context.session):x}"  # server-side object, not a client header
+    def _token(self, ctx: Context) -> SecretStr:
         if self.settings.transport is Transport.STDIO:
-            token = self.settings.api_token
-            if token is None:
+            if self.settings.api_token is None:
                 raise SecureError(Code.UNAUTHENTICATED)
-            return Identity(f"stdio:{pseudonym(token.get_secret_value())}", token, session)
+            return self.settings.api_token
         request = ctx.request_context.request
         headers = getattr(request, "headers", None)
         raw = headers.get(TOKEN_HEADER) if headers is not None else None
         if not raw or not API_TOKEN_RE.match(raw.strip()):
             raise SecureError(Code.UNAUTHENTICATED, "Send your personal F5 XC API token in X-F5XC-API-Token.")
-        token = SecretStr(raw.strip())
-        return Identity(f"token:{pseudonym(token.get_secret_value())}", token, session)
+        return SecretStr(raw.strip())
+
+    async def resolve_identity(self, ctx: Context) -> Identity:
+        token = self._token(ctx)
+        principal = await self.identities.resolve(token)  # validated by XC before any quota
+        return Identity(principal, token, session_id(ctx.request_context.session))
 
     @staticmethod
     def identity() -> Identity:
@@ -79,6 +100,24 @@ class Runtime:
         if ident is None:
             raise SecureError(Code.UNAUTHENTICATED)
         return ident
+
+    # -- audit -------------------------------------------------------------
+    @staticmethod
+    def annotate(**fields: Any) -> None:
+        """Add fields (namespace, target, plan_id...) to the audit line of the current call."""
+        context = _audit_ctx.get()
+        if context is not None:
+            context["extra"].update(fields)
+
+    def audit_event(self, event: str, **fields: Any) -> None:
+        """Dedicated audit event tied to the current call (same request id and user)."""
+        context = _audit_ctx.get() or {}
+        ident = _current.get()
+        self.audit.emit(
+            event=event, request_id=context.get("request_id"), session=ident.session if ident else None,
+            user=ident.principal.user if ident else None, user_uuid=ident.principal.user_uuid if ident else None,
+            **fields,
+        )
 
     # -- XC helpers ----------------------------------------------------------
     async def xc(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -122,19 +161,21 @@ class Runtime:
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             ctx: Context | None = kwargs.get("ctx")
-            request_id = f"req_{secrets.token_hex(6)}"
+            context: dict[str, Any] = {"request_id": f"req_{secrets.token_hex(8)}", "extra": {}}
+            audit_token = _audit_ctx.set(context)
             started = time.perf_counter()
             logged_args = {k: v for k, v in kwargs.items() if k != "ctx"}
             digest = args_hash(name, logged_args)
-            namespace = kwargs.get("namespace")
-            identity_key = "-"
+            for key, field in (("namespace", "namespace"), ("name", "target")):
+                if isinstance(kwargs.get(key), str):
+                    context["extra"][field] = kwargs[key]
+            ident: Identity | None = None
             status, code, detail = "ok", None, ""
             token = None
             try:
                 if ctx is None:
                     raise SecureError(Code.INTERNAL, detail="no context")
-                ident = self.resolve_identity(ctx)
-                identity_key = ident.key
+                ident = await self.resolve_identity(ctx)
                 token = _current.set(ident)
                 self.guardrails.check(identity=ident.key, session=ident.session, tool=name, args_hash=digest)
                 return await fn(*args, **kwargs)
@@ -145,14 +186,18 @@ class Runtime:
                 status, code, detail = "error", Code.INTERNAL, type(exc).__name__
                 raise SecureError(Code.INTERNAL, detail=type(exc).__name__) from exc
             finally:
+                self.audit.emit(
+                    event="tool_call", request_id=context["request_id"], tool=name, tool_class=str(cls),
+                    session=ident.session if ident else None,
+                    user=ident.principal.user if ident else None,
+                    user_uuid=ident.principal.user_uuid if ident else None,
+                    user_type=ident.principal.user_type if ident else None,
+                    args_sha256_16=digest, status=status, error_code=str(code) if code else None,
+                    detail=detail or None, latency_ms=int((time.perf_counter() - started) * 1000),
+                    **context["extra"],
+                )
                 if token is not None:
                     _current.reset(token)
-                self.audit.emit(
-                    request_id=request_id, identity=identity_key, tool=name, tool_class=str(cls),
-                    args_sha256_16=digest, namespace=namespace if isinstance(namespace, str) else None,
-                    target=kwargs.get("name") if isinstance(kwargs.get("name"), str) else None,
-                    status=status, error_code=str(code) if code else None, detail=detail or None,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
-                )
+                _audit_ctx.reset(audit_token)
 
         return wrapper

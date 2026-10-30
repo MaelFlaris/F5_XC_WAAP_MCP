@@ -1,25 +1,38 @@
 """Two-step changes: plan, then apply.
 
-A ``plan_*`` tool computes the exact request body server side, shows a diff,
-and stores the body under a random, single-use plan id bound to the caller's
-identity, with a short TTL. ``apply_plan`` executes that stored body only after
-an explicit human confirmation, and refuses if the object changed since the
-plan was made. The model never supplies the body at apply time, so it cannot
-swap the payload between plan and apply.
+A ``plan_*`` tool computes the exact request body server side and stores it
+under a random, single-use plan id bound to the caller, with a short TTL.
+``apply_plan`` executes that stored body only after a human confirmation whose
+message contains the complete diff and the body hash, and refuses if the
+object changed since the plan was made.
+
+The diff is exhaustive or the plan is refused: every changed leaf is listed
+(lists of named items are matched by name, re-ordering is reported), values
+are shown JSON-escaped and never truncated. Changes touching secret fields are
+refused outright, since they could not be shown to the reviewer.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .errors import Code, SecureError
 
 MAX_PLANS = 256
-MAX_DIFF = 60
+MAX_DIFF_OPS = 80
+MAX_VALUE_CHARS = 300
+MAX_RENDER_CHARS = 8000
+
+_SECRET_PATH = re.compile(
+    r"(?i)(private_key|password|passwd|secret|token|api_?key|client_secret|hmac|credential|pkcs12)"
+)
 
 
 @dataclass
@@ -30,10 +43,23 @@ class Plan:
     kind: str
     namespace: str
     name: str
+    method: str
+    path: str
     body: dict[str, Any]
-    base_version: str | None  # modification timestamp observed when planning
+    body_sha256: str
+    base_version: str | None  # hash of the spec observed when planning (replace only)
     expires_at: float
     summary: str
+    diff: list[dict[str, Any]]
+    risks: list[str] = field(default_factory=list)
+
+    @property
+    def high_risk(self) -> bool:
+        return bool(self.risks)
+
+
+def canonical_hash(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class PlanStore:
@@ -43,7 +69,13 @@ class PlanStore:
         self._lock = threading.Lock()
 
     def create(self, **fields: Any) -> Plan:
-        plan = Plan(plan_id=f"plan_{secrets.token_urlsafe(18)}", expires_at=time.time() + self._ttl, **fields)
+        body = fields["body"]
+        plan = Plan(
+            plan_id=f"plan_{secrets.token_urlsafe(18)}",
+            expires_at=time.time() + self._ttl,
+            body_sha256=canonical_hash({"method": fields["method"], "path": fields["path"], "body": body}),
+            **fields,
+        )
         with self._lock:
             self._evict()
             self._plans[plan.plan_id] = plan
@@ -69,22 +101,125 @@ class PlanStore:
             self._plans.pop(next(iter(self._plans)))
 
 
-def diff(before: Any, after: Any, path: str = "spec", out: list[dict[str, Any]] | None = None) -> list:
-    """Compact structural diff (paths and short values), bounded."""
-    from .sanitize import redact, text
+# --- diff ---------------------------------------------------------------------
+def _show(value: Any) -> str:
+    """JSON-escaped (control, bidi and non-ASCII characters visible), never truncated."""
+    shown = json.dumps(value, sort_keys=True, ensure_ascii=True)
+    if len(shown) > MAX_VALUE_CHARS:
+        raise SecureError(Code.DIFF_TOO_LARGE, f"A value is longer than {MAX_VALUE_CHARS} characters.")
+    return shown
 
-    out = [] if out is None else out
-    if len(out) >= MAX_DIFF:
-        return out
-    if isinstance(before, dict) and isinstance(after, dict):
-        for key in sorted(set(before) | set(after)):
-            if key not in after:
-                out.append({"op": "remove", "path": f"{path}.{key}"})
-            elif key not in before:
-                out.append({"op": "add", "path": f"{path}.{key}", "value": text(redact(after[key]), 300)})
+
+_PLAIN_KEY = re.compile(r"^[A-Za-z0-9_\-]{1,80}$")
+
+
+def _seg(key: Any) -> str:
+    """Path segment safe to print: odd keys are JSON-escaped so they cannot fake diff lines."""
+    key = str(key)
+    return key if _PLAIN_KEY.match(key) else json.dumps(key, ensure_ascii=True)[:120]
+
+
+def _item_key(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    meta = item.get("metadata")
+    name = meta.get("name") if isinstance(meta, dict) else item.get("name")
+    return name if isinstance(name, str) else None
+
+
+def _keyed(items: list[Any]) -> dict[str, Any] | None:
+    keys = [_item_key(i) for i in items]
+    if not items or None in keys or len(set(keys)) != len(keys):
+        return None
+    return dict(zip(keys, items, strict=True))
+
+
+class _Differ:
+    def __init__(self) -> None:
+        self.ops: list[dict[str, Any]] = []
+
+    def _add(self, op: dict[str, Any]) -> None:
+        if _SECRET_PATH.search(op["path"]):
+            raise SecureError(Code.SECRET_FIELD, f"Field {op['path'][:120]}.")
+        self.ops.append(op)
+        if len(self.ops) > MAX_DIFF_OPS:
+            raise SecureError(Code.DIFF_TOO_LARGE, f"More than {MAX_DIFF_OPS} changed fields.")
+
+    def leaves(self, op: str, value: Any, path: str) -> None:
+        """Emit one op per leaf so that nothing is hidden in a big value."""
+        if isinstance(value, dict) and value:
+            for key in sorted(value):
+                self.leaves(op, value[key], f"{path}.{_seg(key)}")
+        elif isinstance(value, list) and value:
+            keyed = _keyed(value)
+            for index, item in enumerate(value):
+                label = f"[{_seg(_item_key(item))}]" if keyed else f"[{index}]"
+                self.leaves(op, item, f"{path}{label}")
+        else:
+            entry = {"op": op, "path": path}
+            entry["after" if op == "add" else "before"] = _show(value)
+            self._add(entry)
+
+    def diff(self, before: Any, after: Any, path: str) -> None:
+        if isinstance(before, dict) and isinstance(after, dict):
+            for key in sorted(set(before) | set(after)):
+                sub = f"{path}.{_seg(key)}"
+                if key not in after:
+                    self.leaves("remove", before[key], sub)
+                elif key not in before:
+                    self.leaves("add", after[key], sub)
+                else:
+                    self.diff(before[key], after[key], sub)
+        elif isinstance(before, list) and isinstance(after, list):
+            self._diff_list(before, after, path)
+        elif before != after:
+            self._add({"op": "change", "path": path, "before": _show(before), "after": _show(after)})
+
+    def _diff_list(self, before: list[Any], after: list[Any], path: str) -> None:
+        kb, ka = _keyed(before), _keyed(after)
+        if kb is not None and ka is not None:
+            for key in kb:
+                if key not in ka:
+                    self.leaves("remove", kb[key], f"{path}[{_seg(key)}]")
+            for key in ka:
+                if key in kb:
+                    self.diff(kb[key], ka[key], f"{path}[{_seg(key)}]")
+                else:
+                    self.leaves("add", ka[key], f"{path}[{_seg(key)}]")
+            common_before = [k for k in kb if k in ka]
+            common_after = [k for k in ka if k in kb]
+            if common_before != common_after:  # rule order matters (first match wins)
+                self._add({"op": "reorder", "path": path, "before": _show(common_before),
+                           "after": _show(common_after)})
+            return
+        for index in range(max(len(before), len(after))):
+            sub = f"{path}[{index}]"
+            if index >= len(after):
+                self.leaves("remove", before[index], sub)
+            elif index >= len(before):
+                self.leaves("add", after[index], sub)
             else:
-                diff(before[key], after[key], f"{path}.{key}", out)
-    elif before != after:
-        out.append({"op": "change", "path": path, "before": text(redact(before), 300),
-                    "after": text(redact(after), 300)})
-    return out
+                self.diff(before[index], after[index], sub)
+
+
+def diff(before: Any, after: Any, path: str = "spec") -> list[dict[str, Any]]:
+    """Exhaustive structural diff; raises DIFF_TOO_LARGE / SECRET_FIELD instead of hiding anything."""
+    differ = _Differ()
+    differ.diff(before, after, path)
+    if len(render(differ.ops)) > MAX_RENDER_CHARS:
+        raise SecureError(Code.DIFF_TOO_LARGE, f"Diff longer than {MAX_RENDER_CHARS} characters.")
+    return differ.ops
+
+
+def render(ops: list[dict[str, Any]]) -> str:
+    lines = []
+    for op in ops:
+        if op["op"] == "add":
+            lines.append(f"+ {op['path']} = {op['after']}")
+        elif op["op"] == "remove":
+            lines.append(f"- {op['path']} (was {op['before']})")
+        elif op["op"] == "reorder":
+            lines.append(f"~ {op['path']} order {op['before']} -> {op['after']}")
+        else:
+            lines.append(f"~ {op['path']}: {op['before']} -> {op['after']}")
+    return "\n".join(lines)

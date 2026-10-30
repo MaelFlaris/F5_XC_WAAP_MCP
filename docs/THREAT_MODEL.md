@@ -5,17 +5,20 @@ policies), journaux de sécurité, journal d'audit du serveur.
 
 | STRIDE | Menace | Contrôle | Où |
 |---|---|---|---|
-| Spoofing | Appel HTTP sans identité, ou avec un token partagé du serveur | Chaque appelant envoie son propre token XC (`X-F5XC-API-Token`) ; démarrage refusé si `F5XC_API_TOKEN` est défini en mode HTTP ; requête sans token refusée | `config.py`, `runtime.py` |
-| Spoofing | DNS rebinding vers le serveur local | Bind loopback uniquement ; protection Host/Origin du SDK MCP (403) | `config.py`, `server.py` |
+| Spoofing | Appel HTTP sans identité, ou avec un token partagé du serveur | Chaque appelant envoie son propre token XC (`X-F5XC-API-Token`) ; démarrage refusé si `F5XC_API_TOKEN` est défini en mode HTTP ; le token est résolu en utilisateur nominatif par XC (`whoami`) avant tout appel ; service credentials refusées par défaut | `config.py`, `runtime.py`, `identity.py` |
+| Spoofing / DoS | Faux tokens pour épuiser les quotas ou solliciter XC | Validation `whoami` avant tout quota ; cache négatif 60 s ; limite globale des validations de tokens inconnus ; limite par IP sur le reverse proxy | `identity.py`, README |
+| Spoofing | DNS rebinding vers le serveur local | Bind loopback par défaut (hors loopback seulement avec `F5XC_MCP_ALLOW_NON_LOOPBACK_BIND` et une liste `Host` explicite) ; protection Host/Origin du SDK MCP (403) | `config.py`, `server.py` |
 | Tampering | Arguments du modèle (injection de chemin, de requête de logs) | Schémas stricts (enums fermées, regex de nom XC, bornes) ; segments d'URL revalidés ; valeurs de filtres sans `" { } \` | `tools/common.py`, `catalog.py` |
-| Tampering | Payload modifié entre plan et apply | Le corps est construit et conservé côté serveur ; `apply_plan` ne prend qu'un `plan_id` aléatoire, à usage unique, lié à l'identité, avec un TTL ; refus si l'objet a changé depuis le plan | `plans.py`, `tools/changes.py` |
-| Repudiation | Action non imputable | Audit JSON par appel : identité pseudonymisée, outil, hash des arguments, statut, code d'erreur, latence | `audit.py`, `runtime.py` |
+| Tampering | Payload modifié entre plan et apply | Le corps est construit et conservé côté serveur ; `apply_plan` ne prend qu'un `plan_id` aléatoire, à usage unique, lié à l'utilisateur, avec un TTL ; refus si l'objet a changé depuis le plan | `plans.py`, `tools/changes.py` |
+| Tampering | L'humain valide un nom et non un changement ; diff tronqué ou maquillé | Le message d'élicitation, construit par le serveur, contient le diff complet, le SHA-256 du corps et un bandeau HIGH RISK ; diff exhaustif feuille par feuille (règles appariées par nom, ordre signalé), valeurs et clés échappées en JSON ; un diff trop gros ou touchant un secret refuse le plan ; HIGH RISK exige de retaper le préfixe du hash | `plans.py`, `tools/changes.py` |
+| Elevation of privilege | Réécriture arbitraire d'un LB, d'une origin pool ou d'une policy | Pas de remplacement générique : outils ciblés seulement ; création limitée aux objets inertes tant qu'ils ne sont pas référencés | `tools/changes.py` |
+| Repudiation | Action non imputable | Audit JSON nominatif (utilisateur XC, UUID, session aléatoire) : `tool_call` pour chaque appel, puis `plan_created`, `plan_confirmation` (issue) et `plan_applied` reliés par `plan_id` et `body_sha256` ; fichier en `0600`, compatible rotation ; `query_audit_logs` XC comme contrôle compensatoire | `audit.py`, `runtime.py` |
 | Information disclosure | Fuite de token ou de secret de configuration | Token jamais journalisé ni renvoyé ; erreurs à code stable sans corps amont ; secrets masqués (clés privées, `clear_secret_info`...) ; vue `spec` interdite pour les objets sensibles | `errors.py`, `sanitize.py` |
 | Information disclosure | Données personnelles des logs (en-têtes, corps, cookies) | Projection sur une liste fermée de champs ; tout le reste est supprimé | `sanitize.py` |
 | Denial of service | Agent en boucle, réponse énorme | Limite de débit par identité et globale, plafond par session, détection de boucle, taille de réponse plafonnée en streaming, fenêtre de temps bornée, pas de retry | `guardrails.py`, `xc_client.py` |
 | Elevation of privilege | Outil d'écriture utilisé en mode lecture | Les outils d'écriture ne sont pas enregistrés en mode read (absents de `tools/list`), test dédié | `runtime.py`, `tests/test_registry.py` |
 | Elevation of privilege | Le serveur agit avec plus de droits que l'utilisateur | Le token de l'utilisateur est utilisé tel quel : le RBAC XC reste la frontière finale | `xc_client.py` |
-| Elevation of privilege | Prompt injection via les données XC (description, user-agent, chemin) poussant à une écriture | Texte nettoyé et borné, résultats marqués `untrusted_content` ; toute écriture exige une confirmation humaine qui retape le nom de l'objet | `sanitize.py`, `tools/changes.py` |
+| Elevation of privilege | Prompt injection via les données XC (description, user-agent, chemin) poussant à une écriture | Texte nettoyé et borné, résultats marqués `untrusted_content` ; toute écriture exige une confirmation humaine sur le diff complet affiché par le serveur | `sanitize.py`, `tools/changes.py` |
 
 ## Risques résiduels assumés
 
@@ -25,8 +28,11 @@ policies), journaux de sécurité, journal d'audit du serveur.
 - **Elicitation automatique.** Un client MCP peut répondre seul à une demande
   d'elicitation (agent autonome). Utilise un client qui montre réellement la question à
   l'utilisateur.
-- **Token non vérifié localement.** En mode HTTP, le serveur ne valide pas le token :
-  c'est XC qui le fait. Une identité « inventée » n'obtient qu'un 401 de XC, mais elle
-  consomme du quota de débit (d'où la limite globale).
+- **Validation de tokens inconnus.** Un client anonyme peut encore consommer le budget
+  global de validations (`F5XC_MCP_AUTH_RATE_PER_MINUTE`) et bloquer temporairement
+  l'arrivée de nouveaux utilisateurs. Les utilisateurs déjà en cache ne sont pas
+  touchés. La limite par IP sur le reverse proxy est la parade.
+- **Risque des `ip_prefix_set`.** Le serveur ne sait pas si une liste sert à bloquer ou
+  à autoriser : toute modification est marquée HIGH RISK par précaution.
 - **Heuristiques de posture.** Les constats de `get_lb_security_posture` sont des
   heuristiques, pas un audit de conformité.

@@ -52,4 +52,5 @@ async def test_audit_log_has_no_token_and_no_argument_values():
     assert lines[1]["error_code"] == "namespace_forbidden"
     raw = json.dumps(lines)
     assert TOKEN not in raw and "secret-value" not in raw
-    assert lines[0]["identity"].startswith("stdio:") and len(lines[0]["args_sha256_16"]) == 16
+    assert lines[0]["user"] == "alice@example.com" and lines[0]["user_uuid"] == "uuid-alice"
+    assert lines[0]["session"].startswith("ses_") and len(lines[0]["args_sha256_16"]) == 16

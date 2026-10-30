@@ -12,7 +12,7 @@ import httpx
 import pytest
 import uvicorn
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from f5xc_waap_mcp.config import Transport
 from tests.conftest import FakeXC, Harness, make_settings
@@ -30,6 +30,7 @@ def free_port() -> int:
 def http_server():
     port = free_port()
     xc = FakeXC()
+    xc.users[ALICE] = {"name": "alice", "email": "alice@example.com", "user_uuid": "uuid-alice", "type": "USER"}
     xc.add("GET", "/api/config/namespaces/prod/app_firewalls", {"items": [{"name": "fw1"}]})
     settings = make_settings(transport=Transport.STREAMABLE_HTTP, api_token=None, bind_port=port,
                              allowed_origins=("https://mcp.example",))
@@ -46,7 +47,11 @@ def http_server():
 
 
 async def call(url: str, headers: dict[str, str]):
-    async with streamablehttp_client(url, headers=headers) as (read, write, _), ClientSession(read, write) as session:
+    async with (
+        httpx.AsyncClient(headers=headers, timeout=30, trust_env=False) as http,
+        streamable_http_client(url, http_client=http) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
         await session.initialize()
         return await session.call_tool("list_objects", {"kind": "app_firewall", "namespace": "prod"})
 
@@ -56,14 +61,21 @@ async def test_token_of_the_caller_is_used(http_server):
     result = await asyncio.wait_for(call(url, {"X-F5XC-API-Token": ALICE}), 20)
     assert not result.isError, result.content
     assert xc.requests[-1].headers["authorization"] == f"APIToken {ALICE}"
-    assert harness.audit()[-1]["identity"].startswith("token:")
+    assert harness.audit()[-1]["user"] == "alice@example.com"
 
 
 async def test_request_without_token_is_refused(http_server):
     url, xc, _ = http_server
     result = await asyncio.wait_for(call(url, {}), 20)
     assert result.isError and "unauthenticated" in result.content[0].text
-    assert xc.requests == []
+    assert xc.api_requests == []
+
+
+async def test_unknown_token_is_refused_without_consuming_api_calls(http_server):
+    url, xc, _ = http_server
+    result = await asyncio.wait_for(call(url, {"X-F5XC-API-Token": "ForgedTokenForgedToken-1234"}), 20)
+    assert result.isError and "unauthenticated" in result.content[0].text
+    assert xc.api_requests == []
 
 
 async def test_foreign_origin_is_rejected(http_server):

@@ -64,12 +64,10 @@ def _load() -> tuple[dict[str, Kind], dict[str, DataEndpoint]]:
 
 KINDS, DATA = _load()
 KIND_NAMES: tuple[str, ...] = tuple(sorted(KINDS))
-WRITABLE_KIND_NAMES: tuple[str, ...] = tuple(sorted(k for k, v in KINDS.items() if v.writable))
 
 # Literal types used in tool signatures: the JSON schema shown to the model
 # is a closed enum, and anything else is rejected before reaching our code.
 KindName = Literal[KIND_NAMES]  # type: ignore[valid-type]
-WritableKindName = Literal[WRITABLE_KIND_NAMES]  # type: ignore[valid-type]
 
 
 def kind(name: str) -> Kind:
