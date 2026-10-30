@@ -1,0 +1,301 @@
+{
+ "kinds": {
+  "app_firewall": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_STATUS",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "36cd67a60b13ee2e555d46a5551168b10d1780f0ab963acfb2552f7f6224e77e",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/app_firewalls/{metadata.name}",
+   "version_precondition_in_put": []
+  },
+  "http_loadbalancer": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_STATUS",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "b6fa215d3d7b3551a5e4c79ae27117dc096704a17ce15e6b0cc3864b549d94b7",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/http_loadbalancers/{metadata.name}",
+   "version_precondition_in_put": []
+  },
+  "ip_prefix_set": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_STATUS",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "fed91cca1bb658223457b6492f0de74b420c167cd16e2b4f9c9a0fab23b5843f",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/ip_prefix_sets/{metadata.name}",
+   "version_precondition_in_put": []
+  },
+  "origin_pool": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "41a390ab06ade77c0c2fc4ec4e6e5aeb9949c3e783b456f072ba1273e859336e",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/origin_pools/{metadata.name}",
+   "version_precondition_in_put": []
+  },
+  "service_policy": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_STATUS",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "bae724b69b2427f798ca460473e04c006da230c9c883a1ebbed44bac16535a0b",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/service_policys/{metadata.name}",
+   "version_precondition_in_put": []
+  },
+  "waf_exclusion_policy": {
+   "get_response_formats": [
+    "GET_RSP_FORMAT_DEFAULT",
+    "GET_RSP_FORMAT_FOR_CREATE",
+    "GET_RSP_FORMAT_FOR_REPLACE",
+    "GET_RSP_FORMAT_STATUS",
+    "GET_RSP_FORMAT_READ",
+    "GET_RSP_FORMAT_REFERRING_OBJECTS",
+    "GET_RSP_FORMAT_BROKEN_REFERENCES"
+   ],
+   "page_sha256": "ceaa99204ed17f4f98273ac47094155b921845f293a54d1d24f2564a5f52eff5",
+   "replace_body_fields": [
+    "metadata",
+    "spec"
+   ],
+   "replace_metadata_fields": [
+    "annotations",
+    "description",
+    "disable",
+    "labels",
+    "name",
+    "namespace"
+   ],
+   "replace_parameters": [
+    [
+     "metadata.namespace",
+     "path"
+    ],
+    [
+     "metadata.name",
+     "path"
+    ],
+    [
+     "body",
+     "body"
+    ]
+   ],
+   "replace_path": "/api/config/namespaces/{metadata.namespace}/waf_exclusion_policys/{metadata.name}",
+   "version_precondition_in_put": []
+  }
+ },
+ "source": "https://docs.cloud.f5.com/docs-v2/api",
+ "waf_exclusion": {
+  "detection_control_fields": [
+   "exclude_attack_type_contexts",
+   "exclude_bot_name_contexts",
+   "exclude_signature_contexts",
+   "exclude_violation_contexts"
+  ],
+  "page_sha256": "f85c32e93f0bd9ea9982afeb60108848db861a50dcb69e8c67e44c0d7b831df2",
+  "simple_rule_fields": [
+   "any_domain",
+   "any_path",
+   "app_firewall_detection_control",
+   "exact_value",
+   "expiration_timestamp",
+   "metadata",
+   "methods",
+   "path_prefix",
+   "path_regex",
+   "suffix_value",
+   "waf_skip_processing"
+  ],
+  "simple_rule_oneofs": {
+   "domain_choice": [
+    "any_domain",
+    "exact_value",
+    "suffix_value"
+   ],
+   "path_choice": [
+    "any_path",
+    "path_prefix",
+    "path_regex"
+   ],
+   "waf_advanced_configuration": [
+    "app_firewall_detection_control",
+    "waf_skip_processing"
+   ]
+  }
+ },
+ "whoami": {
+  "description": "Get fetches user information based on the username header from the request context\nthis API is also called as WhoAmI",
+  "operation": "ves.io.schema.user.CustomAPI.Get",
+  "page_sha256": "902af196047b385ee9aee7bf44555ba765dcd7baa617f1806f4ad3931c92e158",
+  "path": "/api/web/custom/namespaces/{namespace}/whoami",
+  "response_fields_used": {
+   "disabled": true,
+   "email": true,
+   "name": true,
+   "state": true,
+   "type": true,
+   "user_uuid": true
+  },
+  "user_type_enum": [
+   "USER",
+   "SERVICE",
+   "DEBUG"
+  ]
+ }
+}

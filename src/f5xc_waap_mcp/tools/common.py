@@ -26,7 +26,7 @@ _UNITS = {"m": "minutes", "h": "hours", "d": "days"}
 
 def parse_time(value: str, now: datetime | None = None) -> datetime:
     now = now or datetime.now(UTC)
-    match = _RELATIVE.match(value.strip())
+    match = _RELATIVE.fullmatch(value.strip())
     if match:
         return now - timedelta(**{_UNITS[match.group(2)]: int(match.group(1))})
     try:
@@ -97,7 +97,7 @@ def build_query(matchers: list[Matcher] | None) -> str:
         raise SecureError(Code.INVALID_ARGUMENT, "At most 10 filters.")
     parts = []
     for m in matchers:
-        if not _SAFE_VALUE.match(m.value):
+        if not _SAFE_VALUE.fullmatch(m.value):
             raise SecureError(Code.INVALID_ARGUMENT, 'Filter values cannot contain " { } \\ or newlines.')
         parts.append(f'{m.field}{m.op}"{m.value}"')
     return "{" + ", ".join(parts) + "}"

@@ -40,7 +40,7 @@ class XCClient:
             follow_redirects=False,
             timeout=httpx.Timeout(settings.request_timeout_s, connect=min(10.0, settings.request_timeout_s)),
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-            transport=transport or httpx.AsyncHTTPTransport(retries=0, verify=verify),
+            transport=transport or httpx.AsyncHTTPTransport(retries=0, verify=verify, proxy=settings.https_proxy),
         )
 
     async def aclose(self) -> None:

@@ -15,7 +15,7 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from f5xc_waap_mcp.audit import AuditLog
-from f5xc_waap_mcp.config import Settings
+from f5xc_waap_mcp.config import Settings, settings_from_fields
 from f5xc_waap_mcp.runtime import Runtime
 from f5xc_waap_mcp.server import build_server
 from f5xc_waap_mcp.xc_client import XCClient
@@ -37,7 +37,7 @@ def make_settings(**overrides: Any) -> Settings:
         "global_rate_per_minute": 1000,
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    return settings_from_fields(**values)
 
 
 class FakeXC:

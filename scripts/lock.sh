@@ -12,5 +12,8 @@ EXEMPT=(
 COMMON=(--upgrade --generate-hashes --python-version 3.12 --universal --exclude-newer "$CUTOFF" "${EXEMPT[@]}" -q)
 uv pip compile pyproject.toml "${COMMON[@]}" -o requirements.lock
 uv pip compile pyproject.toml --extra dev "${COMMON[@]}" -o requirements-dev.lock
+uv pip compile pyproject.toml --extra fuzz "${COMMON[@]}" -o requirements-fuzz.lock
+# semgrep runs in its own venv (it pins its own mcp version): standalone lock.
+printf 'semgrep==1.180.0\n' | uv pip compile - "${COMMON[@]}" -o requirements-sast.lock
 printf 'hatchling==1.27.0\n' | uv pip compile - "${COMMON[@]}" -o requirements-build.lock
 echo "locks regenerated with cutoff $CUTOFF"

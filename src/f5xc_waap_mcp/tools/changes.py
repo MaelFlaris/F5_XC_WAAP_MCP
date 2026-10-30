@@ -20,6 +20,10 @@ import asyncio
 import copy
 import ipaddress
 import json
+import os
+import re
+import time
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -118,12 +122,23 @@ def _exclusion_rules(node: Any, out: list[dict[str, Any]] | None = None) -> list
     return out
 
 
+MAX_PRECISE_SIGNATURES = 5
+_PLAIN = re.compile(r"[A-Za-z0-9_.\-/\[\]]{1,120}")
+
+
+def shown(value: Any) -> str:
+    """A model- or XC-supplied value as it may appear in a risk reason: kept as is when
+    plain, JSON-escaped otherwise, so it cannot add lines to the confirmation banner."""
+    text = str(value)
+    return text if _PLAIN.fullmatch(text) else json.dumps(text, ensure_ascii=True)[:120]
+
+
 def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
     """A WAF exclusion is low risk only when it targets precise signatures on a precise
     domain and path. Anything broader effectively switches part of the WAF off.
     Field names: policySimpleWafExclusionRule / policyAppFirewallDetectionControl."""
     meta = rule.get("metadata") if isinstance(rule.get("metadata"), dict) else {}
-    label = f"WAF exclusion '{meta.get('name', '?')}'"
+    label = f"WAF exclusion {shown(meta.get('name', '?'))}"
     reasons = []
     if "waf_skip_processing" in rule:
         reasons.append(f"{label} skips all WAF processing")
@@ -133,6 +148,19 @@ def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
         reasons.append(f"{label} applies to any path")
     if "path_regex" in rule:
         reasons.append(f"{label} uses a path regex (scope hard to review)")
+    prefix = rule.get("path_prefix")
+    if isinstance(prefix, str) and prefix.strip("/") == "":
+        reasons.append(f"{label} path prefix {shown(prefix)} covers every path")
+    suffix = rule.get("suffix_value")
+    if isinstance(suffix, str):
+        labels = [part for part in suffix.strip(".").split(".") if part]
+        # One label ("com") is a TLD; two short labels ("co.uk", "com.au") are
+        # usually a public suffix. No public suffix list is shipped: heuristic.
+        if len(labels) < 2 or (len(labels) == 2 and all(len(part) <= 3 for part in labels)):
+            reasons.append(f"{label} domain suffix {shown(suffix)} covers a whole TLD or public suffix")
+    exact = rule.get("exact_value")
+    if isinstance(exact, str) and "*" in exact:
+        reasons.append(f"{label} domain {shown(exact)} contains a wildcard")
     control = rule.get("app_firewall_detection_control")
     control = control if isinstance(control, dict) else {}
     for key, what in (("exclude_attack_type_contexts", "whole attack types"),
@@ -143,6 +171,9 @@ def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
     signatures = control.get("exclude_signature_contexts") or []
     if any(isinstance(sig, dict) and sig.get("signature_id") in (0, "0") for sig in signatures):
         reasons.append(f"{label} excludes ALL signatures (signature_id 0)")
+    if isinstance(signatures, list) and len(signatures) > MAX_PRECISE_SIGNATURES:
+        reasons.append(f"{label} excludes {len(signatures)} signatures at once "
+                       f"(more than {MAX_PRECISE_SIGNATURES})")
     return reasons
 
 
@@ -169,6 +200,9 @@ def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: 
 
 def register(mcp: FastMCP, rt: Runtime) -> None:
     def writable(kind_name: str, namespace: str) -> catalog.Kind:
+        kill = rt.settings.write_kill_switch
+        if kill and os.path.exists(kill):
+            raise SecureError(Code.WRITES_DISABLED)
         rt.require_namespace(namespace, write=True)
         k = catalog.kind(kind_name)
         if not k.writable:
@@ -219,7 +253,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             identity=rt.identity().key, operation=operation, kind=k.name, namespace=namespace, name=name,
             method=method, path=path, body=body,
             base_version=version,
-            summary=summary, diff=ops, risks=risks,
+            summary=summary, diff=ops, risks=risks, before=before if operation == "replace" else None,
         )
         rt.annotate(plan_id=plan.plan_id)
         rt.audit_event("plan_created", plan_id=plan.plan_id, operation=operation, kind=k.name, namespace=namespace,
@@ -242,15 +276,13 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         found: list[str] = []
         complete = True
 
-        def matches(ref: dict[str, Any]) -> bool:
-            return ref.get("name") == name and ref.get("namespace") in (None, "", namespace)
-
         if kind == "service_policy":
             try:
                 method, path = catalog.data_path("namespace.active_service_policies", namespace=namespace)
                 active = await rt.xc(method, path)
                 policies = active.get("service_policies", []) if isinstance(active, dict) else []
-                if any(isinstance(p, dict) and matches(p) for p in policies):
+                if any(isinstance(p, dict) and p.get("name") == name
+                       and p.get("namespace") in (None, "", namespace) for p in policies):
                     found.append(f"the active service policies of namespace {namespace}")
             except SecureError:
                 complete = False
@@ -265,9 +297,10 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                     complete = False
                     return
             spec = obj.get("spec") if isinstance(obj, dict) and isinstance(obj.get("spec"), dict) else {}
-            for ref in sanitize.collect_refs(spec):
-                if matches(ref):
-                    found.append(f"{rk.name} {namespace}/{obj_name} ({ref['field']})")
+            fields, scanned_all = sanitize.find_references_to(spec, name, namespace)
+            if not scanned_all:
+                complete = False
+            found.extend(f"{rk.name} {namespace}/{shown(obj_name)} ({shown(field)})" for field in fields)
 
         for referrer_kind in REFERENCERS.get(kind, ()):
             rk = catalog.kind(referrer_kind)
@@ -393,7 +426,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         if "app_firewall_detection_control" not in rule:
             raise SecureError(Code.INVALID_ARGUMENT, "The rule needs app_firewall_detection_control.")
         meta = rule.get("metadata") if isinstance(rule.get("metadata"), dict) else {}
-        if not isinstance(meta.get("name"), str) or not catalog.XC_NAME_RE.match(meta["name"]):
+        if not isinstance(meta.get("name"), str) or not catalog.XC_NAME_RE.fullmatch(meta["name"]):
             raise SecureError(Code.INVALID_ARGUMENT, "rule.metadata.name must be a valid XC name.")
         if len(json.dumps(rule)) > 16_384:
             raise SecureError(Code.INVALID_ARGUMENT, "Rule too large.")
@@ -469,18 +502,61 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             status, error = "error", str(exc.code)
             raise
         finally:
+            # method + path + user + ts: the keys to match this event 1:1 with the XC audit log.
             rt.audit_event("plan_applied", plan_id=plan.plan_id, operation=plan.operation, kind=plan.kind,
                            namespace=plan.namespace, target=plan.name, body_sha256=plan.body_sha256,
-                           status=status, error_code=error)
+                           method=plan.method, path=plan.path, status=status, error_code=error)
+        rollback = save_rollback(plan)
         return sanitize.envelope("apply_plan", {"applied": True, "plan_id": plan.plan_id, "operation": plan.operation,
                                                 "kind": plan.kind, "namespace": plan.namespace, "name": plan.name,
-                                                "body_sha256": plan.body_sha256, "summary": plan.summary})
+                                                "body_sha256": plan.body_sha256, "summary": plan.summary,
+                                                "rollback_available": rollback})
+
+    def rollback_path(plan_id: str) -> Path | None:
+        directory = rt.settings.rollback_dir
+        return Path(directory) / f"{plan_id}.json" if directory else None
+
+    def save_rollback(plan: Plan) -> bool:
+        """Keep the pre-change spec of an applied replace (0700 dir, 0600 file)."""
+        path = rollback_path(plan.plan_id)
+        if path is None or plan.operation != "replace" or plan.before is None:
+            return False
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        record = {"plan_id": plan.plan_id, "applied_at": time.time(), "user": rt.identity().principal.user,
+                  "kind": plan.kind, "namespace": plan.namespace, "name": plan.name,
+                  "body_sha256": plan.body_sha256, "before_spec": plan.before}
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, sort_keys=True)
+        rt.audit_event("rollback_saved", plan_id=plan.plan_id, kind=plan.kind, namespace=plan.namespace,
+                       target=plan.name)
+        return True
+
+    @rt.tool(mcp, ToolClass.WRITE, title="Plan: revert an applied change", idempotent=False)
+    async def plan_revert(
+        plan_id: Annotated[str, StringConstraints(min_length=10, max_length=64, pattern=r"^plan_[A-Za-z0-9_\-]+$")],
+        ctx: Context,
+    ) -> dict:
+        """Prepare restoring the spec an applied change replaced. The inverse change is a normal plan:
+        complete diff, risk banner, human confirmation, stale check. Creations cannot be reverted here."""
+        path = rollback_path(plan_id)
+        if path is None or not path.is_file():
+            raise SecureError(Code.ROLLBACK_UNAVAILABLE)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        k = writable(record["kind"], record["namespace"])
+        metadata, before, version = await current(k, record["namespace"], record["name"])
+        rt.annotate(reverts=plan_id)
+        return make_plan(k=k, operation="replace", namespace=record["namespace"], name=record["name"],
+                         metadata=metadata, before=before, after=record["before_spec"], version=version,
+                         summary=f"REVERT {plan_id} on {record['kind']} {record['name']}")
 
 
 def confirmation_message(plan: Plan) -> str:
     banner = ""
     if plan.risks:
-        banner = "!!! HIGH RISK !!!\n" + "\n".join(f"  - {reason}" for reason in plan.risks) + "\n\n"
+        # Each reason on exactly one line, whatever it contains (defence in depth).
+        lines = [r if r.isprintable() else json.dumps(r, ensure_ascii=True) for r in plan.risks]
+        banner = "!!! HIGH RISK !!!\n" + "\n".join(f"  - {line}" for line in lines) + "\n\n"
     return (
         f"{banner}Change requested in F5 Distributed Cloud: {plan.summary}\n"
         f"Target: {plan.operation} {plan.kind} {plan.namespace}/{plan.name}\n"

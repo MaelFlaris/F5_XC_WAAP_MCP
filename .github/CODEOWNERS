@@ -1,0 +1,14 @@
+# Security-critical code requires a review from the repository owner
+# (effective once branch protection requires code owner reviews).
+/src/f5xc_waap_mcp/plans.py          @MaelFlaris
+/src/f5xc_waap_mcp/identity.py       @MaelFlaris
+/src/f5xc_waap_mcp/runtime.py        @MaelFlaris
+/src/f5xc_waap_mcp/config.py         @MaelFlaris
+/src/f5xc_waap_mcp/sanitize.py       @MaelFlaris
+/src/f5xc_waap_mcp/xc_client.py      @MaelFlaris
+/src/f5xc_waap_mcp/tools/changes.py  @MaelFlaris
+/scripts/lock.sh                     @MaelFlaris
+/scripts/mutate_guards.py            @MaelFlaris
+/.semgrep/                           @MaelFlaris
+/.github/                            @MaelFlaris
+/requirements*.lock                  @MaelFlaris

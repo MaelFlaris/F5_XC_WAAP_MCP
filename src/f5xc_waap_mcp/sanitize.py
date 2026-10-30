@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 from .catalog import Kind
@@ -29,7 +30,21 @@ MAX_LIST = 100
 MAX_DEPTH = 12
 REDACTED = "[redacted]"
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]")
+# Hidden characters removed from untrusted text, by Unicode category rather than
+# by list: Cc (controls), Cf (format: bidi controls, zero-width characters, soft
+# hyphen, Unicode Tags U+E0000-E007F used for "ASCII smuggling"), Co (private
+# use), Cn (unassigned), Cs (surrogates). Variation selectors are marks (Mn) but
+# can encode hidden data, so they are removed too.
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cn", "Cs"})
+_VARIATION_SELECTORS = ((0xFE00, 0xFE0F), (0xE0100, 0xE01EF), (0x180B, 0x180F))
+
+
+def _hidden(ch: str) -> bool:
+    if unicodedata.category(ch) in _HIDDEN_CATEGORIES:
+        return True
+    code = ord(ch)
+    return any(low <= code <= high for low, high in _VARIATION_SELECTORS)
+
 _SECRET_KEY = re.compile(
     r"(?i)(private_key|password|passwd|secret|token|api_?key|client_secret|hmac|credential|"
     r"clear_secret_info|blindfold_secret_info|vault_secret_info|wingman_secret_info|pkcs12|"
@@ -46,7 +61,7 @@ def text(value: Any, limit: int = MAX_TEXT) -> str:
         return ""
     if not isinstance(value, str):
         value = str(value)
-    value = _CONTROL.sub(" ", value)
+    value = "".join(" " if _hidden(ch) else ch for ch in value)
     value = " ".join(value.split())
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
@@ -88,13 +103,19 @@ def ref(node: Any) -> dict[str, str] | None:
     return None
 
 
+REF_DEPTH = 64
+
+
 def collect_refs(node: Any, path: str = "", out: list[dict[str, str]] | None = None, depth: int = 0) -> list:
-    """All object references (dicts with name+namespace|tenant) found in a spec."""
+    """All object references (dicts with name + namespace|tenant) found in a spec.
+
+    No count limit and no list slicing: callers that display references bound
+    the output themselves and say so (``references_truncated``)."""
     out = [] if out is None else out
-    if depth > MAX_DEPTH or len(out) >= 50:
+    if depth > REF_DEPTH:
         return out
     if isinstance(node, dict):
-        if isinstance(node.get("name"), str) and ("namespace" in node or "tenant" in node) and len(node) <= 4:
+        if isinstance(node.get("name"), str) and ("namespace" in node or "tenant" in node) and len(node) <= 5:
             r = ref(node)
             if r is not None:
                 out.append({"field": path[:120], **r})
@@ -103,9 +124,39 @@ def collect_refs(node: Any, path: str = "", out: list[dict[str, str]] | None = N
             if not _SECRET_KEY.search(str(key)):
                 collect_refs(value, f"{path}.{key}" if path else str(key), out, depth + 1)
     elif isinstance(node, list):
-        for i, value in enumerate(node[:MAX_LIST]):
+        for i, value in enumerate(node):
             collect_refs(value, f"{path}[{i}]", out, depth + 1)
     return out
+
+
+def find_references_to(node: Any, name: str, namespace: str) -> tuple[list[str], bool]:
+    """Fields of a spec that reference an object called ``name`` in ``namespace``.
+
+    Used to decide whether creating that object activates it immediately, so it
+    over-approximates on purpose: any dict whose ``name`` equals the target and
+    that carries a namespace, tenant or kind key counts, whatever its other keys.
+    Returns (fields, complete); complete is False when the spec is deeper than
+    the scan limit."""
+    found: list[str] = []
+    complete = True
+
+    def walk(item: Any, path: str, depth: int) -> None:
+        nonlocal complete
+        if depth > REF_DEPTH:
+            complete = False
+            return
+        if isinstance(item, dict):
+            if (item.get("name") == name and any(k in item for k in ("namespace", "tenant", "kind"))
+                    and item.get("namespace") in (None, "", namespace)):
+                found.append(path[:200] or "spec")
+            for key, value in item.items():
+                walk(value, f"{path}.{key}" if path else str(key), depth + 1)
+        elif isinstance(item, list):
+            for i, value in enumerate(item):
+                walk(value, f"{path}[{i}]", depth + 1)
+
+    walk(node, "", 0)
+    return found, complete
 
 
 def oneof_choices(k: Kind, spec: dict[str, Any]) -> dict[str, Any]:
@@ -147,11 +198,13 @@ def metadata(obj: dict[str, Any]) -> dict[str, Any]:
 
 def summarize(k: Kind, obj: dict[str, Any]) -> dict[str, Any]:
     spec = obj.get("spec") if isinstance(obj.get("spec"), dict) else {}
+    references = collect_refs(spec)
     summary: dict[str, Any] = {
         "kind": k.name,
         **metadata(obj),
         "choices": oneof_choices(k, spec),
-        "references": collect_refs(spec),
+        "references": references[:50],
+        "references_truncated": len(references) > 50,
         "configured_fields": sorted(key for key in spec if key in k.spec_fields)[:120],
     }
     if isinstance(spec.get("domains"), list):

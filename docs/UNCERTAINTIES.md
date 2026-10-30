@@ -27,10 +27,15 @@ vérifiés sur un tenant de test (token en lecture seule d'abord).
      `namespaces/system` ; un 403 est remonté en `identity_unavailable`, sans cache ;
    - quels champs (`email`, `user_uuid`, `type`) sont remplis pour un token personnel
      et pour une service credential.
-6. **Références vers des objets inexistants.** La recherche avant création suppose que
+6. **Vérifié depuis dans la spec brute** (`docs/evidence/openapi-facts.json`) : le PUT
+   n'a aucune précondition de version ; le replace réécrit `labels`, `annotations`,
+   `description` et `disable` ; les champs de `app_firewall_detection_control` ; le schéma
+   de réponse de `whoami` contient `name`, `email`, `user_uuid` et `type`. Reste à
+   vérifier sur un tenant que `whoami` les **remplit** pour un token API.
+7. **Références vers des objets inexistants.** La recherche avant création suppose que
    XC accepte qu'un LB ou une policy référence un objet qui n'existe pas encore (le
    format de réponse `GET_RSP_FORMAT_BROKEN_REFERENCES` le suggère). La liste des types
    référents (`REFERENCERS` dans `tools/changes.py`) est à valider.
-7. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
+8. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
    (seulement `label_filter` / `report_fields`). Le serveur tronque à
    `F5XC_MCP_MAX_ITEMS` et l'indique (`truncated: true`).

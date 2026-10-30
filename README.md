@@ -51,6 +51,7 @@ docs.cloud.f5.com).
 | `plan_add_waf_exclusion_rule` | Ajouter une exclusion WAF (faux positif). Les règles qui désactivent tout le WAF sont refusées |
 | `plan_create_object` | Créer un objet sans effet tant qu'il n'est pas référencé : App Firewall, service policy, ip_prefix_set, rate limiter, WAF exclusion policy, health check |
 | `apply_plan(plan_id)` | Applique un plan après confirmation humaine |
+| `plan_revert(plan_id)` | Prépare le retour à l'état d'avant un replace appliqué (si `F5XC_MCP_ROLLBACK_DIR` est défini) ; plan revu comme les autres |
 
 ### Ce que voit la personne qui confirme
 
@@ -98,7 +99,8 @@ python -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.lock
 pip install --require-hashes -r requirements-build.lock
 pip install --no-deps --no-build-isolation .
-pytest
+pytest                                              # tests + propriétés Hypothesis
+python -I scripts/mutate_guards.py . mutation.json  # chaque garde-fou doit être tué par les tests
 ```
 
 ## Configuration
@@ -115,6 +117,9 @@ pytest
 | `F5XC_MCP_ALLOW_NON_LOOPBACK_BIND` | `false` | Autorise un bind hors loopback (conteneur). Exige le mode HTTP et `F5XC_MCP_ALLOWED_HOSTS` |
 | `F5XC_MCP_ALLOWED_HOSTS` / `_ORIGINS` | localhost | Valeurs `Host` et `Origin` acceptées (anti DNS rebinding) |
 | `F5XC_MCP_CA_BUNDLE` | — | CA supplémentaire (proxy d'entreprise) ; la vérification TLS ne peut pas être désactivée |
+| `F5XC_MCP_HTTPS_PROXY` | — | Proxy sortant vers XC (`http(s)://hôte:port`, sans identifiants). `HTTPS_PROXY` n'est **pas** lu |
+| `F5XC_MCP_WRITE_KILL_SWITCH` | — | Chemin d'un fichier : tant qu'il existe, toute écriture est refusée (sans redémarrage) |
+| `F5XC_MCP_ROLLBACK_DIR` | — | Répertoire (`0700`) où l'état « avant » de chaque replace appliqué est gardé (`0600`) pour `plan_revert` |
 | `F5XC_MCP_RATE_PER_MINUTE` / `_GLOBAL_RATE_PER_MINUTE` | 60 / 300 | Limites de débit |
 | `F5XC_MCP_MAX_EVENTS`, `_MAX_ITEMS`, `_MAX_QUERY_WINDOW_H` | 100, 200, 168 | Bornes des réponses |
 | `F5XC_MCP_PLAN_TTL_S` | 300 | Durée de vie d'un plan |
@@ -192,9 +197,10 @@ tokens inconnus, mais il ne voit que l'IP du proxy.
 
 ### Conteneur
 
-L'image est construite à partir d'une base épinglée par digest. Les dépendances sont
-vérifiées par hash, et elle tourne en utilisateur non-root (UID 65532) sans outil de
-build.
+L'image est construite à partir d'une base Debian 13 (trixie) épinglée par digest. Les
+dépendances sont vérifiées par hash, elle tourne en utilisateur non-root (UID 65532), sans
+outil de build ni pip. La CI la scanne avec Trivy et échoue sur toute vulnérabilité
+HIGH/CRITICAL corrigeable.
 
 ```bash
 docker build -t f5xc-waap-mcp .
@@ -244,6 +250,24 @@ python scripts/generate_catalog.py
 ```
 
 Le script échoue si un chemin utilisé n'existe plus dans la documentation.
+
+## Seules les variables `F5XC_*` comptent
+
+Le serveur ne lit que les variables préfixées `F5XC_` (et `F5XC_MCP_`). Des variables
+génériques comme `MODE`, `API_TOKEN` ou `HTTPS_PROXY` n'ont aucun effet ; un test et une
+règle Semgrep l'imposent (audit F-15).
+
+## Preuves de sécurité
+
+Réponse à l'audit, preuves et commandes de rejeu : [docs/AUDIT_RESPONSE.md](docs/AUDIT_RESPONSE.md).
+
+| Outil | Ce qu'il prouve |
+|---|---|
+| Propriétés Hypothesis (`tests/test_diff_reconstruction.py`, `tests/test_audit_properties.py`) | Le diff se rejoue exactement ; aucune ligne forgeable ; aucun caractère invisible ne passe |
+| `scripts/mutate_guards.py` | Chaque garde-fou retiré fait échouer au moins un test |
+| `fuzz/fuzz_parsers.py` (atheris) | Requêtes de logs, chemins, sanitisation et diff tiennent leurs invariants sur entrées arbitraires |
+| `.semgrep/rules.yml` | Pas de fuite de token vers log/erreur/réponse ; pas de chemin XC hors catalogue ; `fullmatch` imposé |
+| `scripts/openapi_facts.py` | Faits tirés de la spec OpenAPI brute (pas de précondition de version, champs d'exclusion WAF, `whoami`) |
 
 ## Licence
 

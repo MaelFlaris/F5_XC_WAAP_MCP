@@ -85,7 +85,7 @@ class Runtime:
         request = ctx.request_context.request
         headers = getattr(request, "headers", None)
         raw = headers.get(TOKEN_HEADER) if headers is not None else None
-        if not raw or not API_TOKEN_RE.match(raw.strip()):
+        if not raw or not API_TOKEN_RE.fullmatch(raw.strip()):
             raise SecureError(Code.UNAUTHENTICATED, "Send your personal F5 XC API token in X-F5XC-API-Token.")
         return SecretStr(raw.strip())
 

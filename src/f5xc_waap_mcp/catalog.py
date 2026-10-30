@@ -78,7 +78,7 @@ def kind(name: str) -> Kind:
 
 
 def _segment(value: str) -> str:
-    if not isinstance(value, str) or len(value) > 63 or not XC_NAME_RE.match(value):
+    if not isinstance(value, str) or len(value) > 63 or not XC_NAME_RE.fullmatch(value):
         raise SecureError(Code.INVALID_ARGUMENT, "Names must match ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ (max 63).")
     return value
 

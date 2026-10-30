@@ -7,6 +7,7 @@ policies), journaux de sécurité, journal d'audit du serveur.
 |---|---|---|---|
 | Spoofing | Appel HTTP sans identité, ou avec un token partagé du serveur | Chaque appelant envoie son propre token XC (`X-F5XC-API-Token`) ; démarrage refusé si `F5XC_API_TOKEN` est défini en mode HTTP ; le token est résolu en utilisateur nominatif par XC (`whoami`) avant tout appel ; service credentials refusées par défaut | `config.py`, `runtime.py`, `identity.py` |
 | Spoofing / DoS | Faux tokens pour épuiser les quotas ou solliciter XC | Validation `whoami` avant tout quota ; cache négatif 60 s ; limite globale des validations de tokens inconnus ; limite par IP sur le reverse proxy | `identity.py`, README |
+| Tampering / EoP | Configuration injectée par des variables d'environnement génériques (`MODE=write`, `API_TOKEN`) | Seuls les noms `F5XC_*` sont lus (`populate_by_name=False`) ; test et règle Semgrep | `config.py` |
 | Spoofing | DNS rebinding vers le serveur local | Bind loopback par défaut (hors loopback seulement avec `F5XC_MCP_ALLOW_NON_LOOPBACK_BIND` et une liste `Host` explicite) ; protection Host/Origin du SDK MCP (403) | `config.py`, `server.py` |
 | Tampering | Arguments du modèle (injection de chemin, de requête de logs) | Schémas stricts (enums fermées, regex de nom XC, bornes) ; segments d'URL revalidés ; valeurs de filtres sans `" { } \` | `tools/common.py`, `catalog.py` |
 | Tampering | Payload modifié entre plan et apply | Le corps est construit et conservé côté serveur ; `apply_plan` ne prend qu'un `plan_id` aléatoire, à usage unique, lié à l'utilisateur, avec un TTL | `plans.py`, `tools/changes.py` |
@@ -21,7 +22,8 @@ policies), journaux de sécurité, journal d'audit du serveur.
 | Denial of service | Agent en boucle, réponse énorme | Limite de débit par identité et globale, plafond par session, détection de boucle, taille de réponse plafonnée en streaming, fenêtre de temps bornée, pas de retry | `guardrails.py`, `xc_client.py` |
 | Elevation of privilege | Outil d'écriture utilisé en mode lecture | Les outils d'écriture ne sont pas enregistrés en mode read (absents de `tools/list`), test dédié | `runtime.py`, `tests/test_registry.py` |
 | Elevation of privilege | Le serveur agit avec plus de droits que l'utilisateur | Le token de l'utilisateur est utilisé tel quel : le RBAC XC reste la frontière finale | `xc_client.py` |
-| Elevation of privilege | Prompt injection via les données XC (description, user-agent, chemin) poussant à une écriture | Texte nettoyé et borné, résultats marqués `untrusted_content` ; toute écriture exige une confirmation humaine sur le diff complet affiché par le serveur | `sanitize.py`, `tools/changes.py` |
+| Elevation of privilege | Prompt injection via les données XC (description, user-agent, chemin) poussant à une écriture | Texte nettoyé et borné ; caractères invisibles supprimés par catégorie Unicode (dont Unicode Tags) ; résultats marqués `untrusted_content` ; toute écriture exige une confirmation humaine sur le diff complet affiché par le serveur | `sanitize.py`, `tools/changes.py` |
+| Repudiation / disponibilité | Écriture erronée impossible à défaire, arrêt d'urgence lent | Interrupteur d'arrêt par fichier (sans redémarrage) ; état « avant » archivé et `plan_revert` revu ; `plan_applied` corrélable à l'audit log XC | `tools/changes.py` |
 
 ## Risques résiduels assumés
 
@@ -36,7 +38,7 @@ policies), journaux de sécurité, journal d'audit du serveur.
   l'arrivée de nouveaux utilisateurs. Les utilisateurs déjà en cache ne sont pas
   touchés. La limite par IP sur le reverse proxy est la parade.
 - **Fenêtre entre contrôle et PUT.** L'API XC publiée n'offre ni `resource_version` ni
-  `If-Match` sur le PUT (vérifié dans la référence). Une modification faite par un tiers
+  `If-Match` sur le PUT (vérifié dans la spec brute : `docs/evidence/openapi-facts.json`). Une modification faite par un tiers
   entre la relecture de contrôle et le PUT (quelques dizaines de millisecondes) serait
   écrasée. Elle reste visible dans `query_audit_logs` côté XC.
 - **Recherche de références à la création.** Elle couvre les types qui référencent
@@ -45,5 +47,10 @@ policies), journaux de sécurité, journal d'audit du serveur.
   namespace ne serait pas vu.
 - **Risque des `ip_prefix_set`.** Le serveur ne sait pas si une liste sert à bloquer ou
   à autoriser : toute modification est marquée HIGH RISK par précaution.
+- **Image de base.** 44 vulnérabilités HIGH Debian sans correctif publié (util-linux,
+  sqlite, ncurses…) restent dans l'image trixie ; le processus ne les invoque pas. La CI
+  bloque dès qu'un correctif existe.
+- **Exclusions WAF.** La détection des suffixes publics est heuristique (pas de liste des
+  suffixes publics embarquée).
 - **Heuristiques de posture.** Les constats de `get_lb_security_posture` sont des
   heuristiques, pas un audit de conformité.

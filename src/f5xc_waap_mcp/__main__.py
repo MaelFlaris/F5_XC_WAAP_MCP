@@ -7,7 +7,7 @@ import sys
 
 from pydantic import ValidationError
 
-from .config import Settings, Transport, get_settings
+from .config import Transport, get_settings, settings_from_fields
 from .server import build_server, run
 
 
@@ -17,7 +17,7 @@ def main() -> int:
         # ``check`` uses the operator's own F5XC_API_TOKEN and serves nothing,
         # whatever the transport configured for the server.
         settings = (
-            Settings(transport=Transport.STDIO, bind_host="127.0.0.1")  # type: ignore[call-arg]
+            settings_from_fields(transport=Transport.STDIO, bind_host="127.0.0.1")
             if checking else get_settings()
         )
     except ValidationError as exc:

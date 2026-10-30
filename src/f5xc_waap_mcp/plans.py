@@ -52,6 +52,7 @@ class Plan:
     summary: str
     diff: list[dict[str, Any]]
     risks: list[str] = field(default_factory=list)
+    before: dict[str, Any] | None = None  # spec observed when planning (replace), kept for rollback
 
     @property
     def high_risk(self) -> bool:
@@ -116,7 +117,7 @@ _PLAIN_KEY = re.compile(r"^[A-Za-z0-9_\-]{1,80}$")
 def _seg(key: Any) -> str:
     """Path segment safe to print: odd keys are JSON-escaped so they cannot fake diff lines."""
     key = str(key)
-    return key if _PLAIN_KEY.match(key) else json.dumps(key, ensure_ascii=True)[:120]
+    return key if _PLAIN_KEY.fullmatch(key) else json.dumps(key, ensure_ascii=True)[:120]
 
 
 def _item_key(item: Any) -> str | None:
@@ -160,19 +161,29 @@ class _Differ:
             entry["after" if op == "add" else "before"] = _show(value)
             self._add(entry)
 
+    def removed(self, value: Any, path: str) -> None:
+        """A key or list item that disappears. Its leaves are listed, then one explicit
+        line says the container itself is gone: otherwise "object removed" and
+        "object emptied" would render identically (an empty object can select an
+        XC option)."""
+        self.leaves("remove", value, path)
+        if isinstance(value, dict | list) and value:
+            self._add({"op": "remove", "path": path, "whole": "object" if isinstance(value, dict) else "list"})
+
     def diff(self, before: Any, after: Any, path: str) -> None:
         if isinstance(before, dict) and isinstance(after, dict):
             for key in sorted(set(before) | set(after)):
                 sub = f"{path}.{_seg(key)}"
                 if key not in after:
-                    self.leaves("remove", before[key], sub)
+                    self.removed(before[key], sub)
                 elif key not in before:
                     self.leaves("add", after[key], sub)
                 else:
                     self.diff(before[key], after[key], sub)
         elif isinstance(before, list) and isinstance(after, list):
             self._diff_list(before, after, path)
-        elif before != after:
+        elif type(before) is not type(after) or json.dumps(before) != json.dumps(after):
+            # Compare what is sent, not Python equality: true != 1, 1 != 1.0, 0.0 != -0.0.
             self._add({"op": "change", "path": path, "before": _show(before), "after": _show(after)})
 
     def _diff_list(self, before: list[Any], after: list[Any], path: str) -> None:
@@ -180,7 +191,7 @@ class _Differ:
         if kb is not None and ka is not None:
             for key in kb:
                 if key not in ka:
-                    self.leaves("remove", kb[key], f"{path}[{_seg(key)}]")
+                    self.removed(kb[key], f"{path}[{_seg(key)}]")
             for key in ka:
                 if key in kb:
                     self.diff(kb[key], ka[key], f"{path}[{_seg(key)}]")
@@ -195,7 +206,7 @@ class _Differ:
         for index in range(max(len(before), len(after))):
             sub = f"{path}[{index}]"
             if index >= len(after):
-                self.leaves("remove", before[index], sub)
+                self.removed(before[index], sub)
             elif index >= len(before):
                 self.leaves("add", after[index], sub)
             else:
@@ -216,6 +227,8 @@ def render(ops: list[dict[str, Any]]) -> str:
     for op in ops:
         if op["op"] == "add":
             lines.append(f"+ {op['path']} = {op['after']}")
+        elif op["op"] == "remove" and "whole" in op:
+            lines.append(f"- {op['path']} (whole {op['whole']} removed)")
         elif op["op"] == "remove":
             lines.append(f"- {op['path']} (was {op['before']})")
         elif op["op"] == "reorder":

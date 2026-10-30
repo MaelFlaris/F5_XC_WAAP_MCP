@@ -1,0 +1,68 @@
+# Semgrep rules from the 2026-10-30 audit (taint: token -> log/response; argument -> URL),
+# plus regressions for F-05 and F-15. Run: semgrep scan --metrics=off --error --config .semgrep/rules.yml src
+rules:
+  - id: xc-token-leak
+    mode: taint
+    message: XC API token value flows to a log, an error, stdout or a tool result
+    severity: ERROR
+    languages: [python]
+    pattern-sources:
+      - pattern: $T.get_secret_value()
+      - pattern: $H.get("x-f5xc-api-token")
+      - pattern: $H.get(TOKEN_HEADER)
+    pattern-sanitizers:
+      # the XC response (status, body) is not the token sent in the request headers
+      - pattern: self._http.stream(...)
+      - pattern: hashlib.sha256(...)
+      - pattern: SecretStr(...)
+      - pattern: $RE.fullmatch(...)
+    pattern-sinks:
+      - pattern: $A.emit(...)
+      - pattern: print(...)
+      - pattern: sys.stderr.write(...)
+      - pattern: $S.write(...)
+      - pattern: SecureError(...)
+      - pattern: sanitize.envelope(...)
+      - pattern: logging.$F(...)
+      - patterns:
+          - pattern-inside: |
+              async def $TOOL(...):
+                ...
+          - pattern: return $X
+  - id: xc-path-not-from-catalog
+    message: XC request path not produced by the closed catalogue (catalog.kind_path / data_path)
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: rt.xc($M, $P, ...)
+          - pattern: $C.request($M, $P, ...)
+      - metavariable-pattern:
+          metavariable: $P
+          patterns:
+            - pattern-not: catalog.kind_path(...)
+            - pattern-not: path
+            - pattern-not: p
+            - pattern-not: plan.path
+  - id: model-arg-in-fstring-url
+    # The audit version (pattern: f"/api/...{$X}...") was silently not loaded by semgrep.
+    message: f-string containing /api/ built from a variable (path injection risk)
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: f"...{$X}..."
+      - pattern-regex: f["']/api/
+  - id: anchored-regex-match
+    message: re.match with ^...$ accepts a trailing newline; validation regexes must use fullmatch (audit F-05)
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: $RE.match(...)
+      - metavariable-regex:
+          metavariable: $RE
+          regex: (^_?[A-Z][A-Z0-9_]*$)
+  - id: settings-populate-by-name
+    message: populate_by_name=True makes pydantic-settings read generic env names (MODE, API_TOKEN...) (audit F-15)
+    severity: ERROR
+    languages: [python]
+    pattern: SettingsConfigDict(..., populate_by_name=True, ...)

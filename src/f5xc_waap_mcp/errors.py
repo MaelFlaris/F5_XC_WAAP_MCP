@@ -52,6 +52,8 @@ class Code(StrEnum):
     PLAN_USER_MISMATCH = "plan_user_mismatch"
     PLAN_STALE = "plan_stale"
     CONFIRMATION_REQUIRED = "confirmation_required"
+    WRITES_DISABLED = "writes_disabled"
+    ROLLBACK_UNAVAILABLE = "rollback_unavailable"
     INTERNAL = "internal_error"
 
 
@@ -83,6 +85,8 @@ MESSAGES: dict[Code, str] = {
     Code.PLAN_UNKNOWN: "Unknown, expired or already used plan id.",
     Code.PLAN_USER_MISMATCH: "This plan was created by another identity.",
     Code.PLAN_STALE: "The object changed since the plan was created; create a new plan.",
+    Code.WRITES_DISABLED: "Writes are disabled by the operator kill switch.",
+    Code.ROLLBACK_UNAVAILABLE: "No rollback record for this plan (not a replace, not applied, or rollback disabled).",
     Code.CONFIRMATION_REQUIRED: "Change not applied: explicit human confirmation is required.",
     Code.INTERNAL: "Internal error.",
 }

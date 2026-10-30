@@ -28,9 +28,10 @@ jobs:
           python -m pip install --require-hashes -r requirements-dev.lock
           python -m pip install --require-hashes -r requirements-build.lock
           python -m pip install --no-deps --no-build-isolation .
-      - run: ruff check src tests scripts
+      - run: ruff check src tests scripts fuzz
       - run: bandit -q -r src -ll
-      - run: pytest
+      - name: Tests, including Hypothesis properties (diff reconstruction, audit properties)
+        run: pytest
       - name: Read-only gate (no write tool published in read mode)
         run: pytest tests/test_registry.py
 
@@ -46,15 +47,81 @@ jobs:
       - run: python -m pip install --require-hashes -r requirements-dev.lock
       - name: Known vulnerabilities
         run: |
-          for lock in requirements.lock requirements-dev.lock requirements-build.lock; do
+          for lock in requirements.lock requirements-dev.lock requirements-build.lock requirements-fuzz.lock; do
             pip-audit -r "$lock" --require-hashes --disable-pip
           done
+          # semgrep (CI-only, own venv) pins opentelemetry-api<1.38. CVE-2026-114603 is a ReDoS
+          # on an *inbound* tracestate HTTP header: the semgrep CLI serves no HTTP. Re-check on bumps.
+          pip-audit -r requirements-sast.lock --require-hashes --disable-pip --ignore-vuln CVE-2026-114603
       - name: SBOM (CycloneDX, runtime dependencies)
         run: cyclonedx-py requirements requirements.lock -o sbom.cdx.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m venv /tmp/sast && /tmp/sast/bin/pip install --require-hashes -r requirements-sast.lock
+      - name: Rules detect their positive cases (semgrep --test)
+        run: /tmp/sast/bin/semgrep --test --metrics=off --config .semgrep/rules.yml .semgrep/rules.py
+      - name: Taint and path rules on src (token -> log/response, argument -> URL)
+        run: /tmp/sast/bin/semgrep scan --metrics=off --error --config .semgrep/rules.yml src
+
+  mutation:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --require-hashes -r requirements-build.lock
+          python -m pip install --no-deps --no-build-isolation .
+      - name: Every security guard is killed by the test suite
+        run: python -I scripts/mutate_guards.py . mutation.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: mutation-report
+          path: mutation.json
+
+  fuzz:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --require-hashes -r requirements-fuzz.lock
+          python -m pip install --require-hashes -r requirements-build.lock
+          python -m pip install --no-deps --no-build-isolation .
+      - name: atheris on untrusted-input parsers (10 min; 30 min on the weekly run)
+        run: |
+          mkdir -p fuzz-artifacts
+          python -I fuzz/fuzz_parsers.py -artifact_prefix=fuzz-artifacts/ \
+            -max_total_time=${{ github.event_name == 'schedule' && 1800 || 600 }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: fuzz-artifacts/
 
   image:
     runs-on: ubuntu-latest
@@ -63,7 +130,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387  # v3.5.0
+        with:
+          dockerfile: Dockerfile
       - run: docker build -t f5xc-waap-mcp:ci .
+      - name: Image vulnerabilities (fail on any fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: f5xc-waap-mcp:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Image SBOM and full vulnerability report (artifact)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: f5xc-waap-mcp:ci
+          format: cyclonedx
+          output: sbom-image.cdx.json
+          skip-setup-trivy: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: sbom-image
+          path: sbom-image.cdx.json
+      - name: Image has no pip at runtime
+        run: docker run --rm --entrypoint python f5xc-waap-mcp:ci -c "import importlib.util as u; assert u.find_spec('pip') is None"
       - name: Image runs as non-root, without build tooling
         run: |
           docker run --rm --entrypoint python f5xc-waap-mcp:ci -c \

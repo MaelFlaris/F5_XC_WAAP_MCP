@@ -22,7 +22,9 @@ dev = [
   "bandit==1.9.4",
   "pip-audit==2.10.1",
   "cyclonedx-bom==7.5.0",
+  "hypothesis==6.140.2",
 ]
+fuzz = ["atheris==3.1.0"]
 
 [project.scripts]
 f5xc-waap-mcp = "f5xc_waap_mcp.__main__:main"
@@ -50,3 +52,6 @@ ignore = ["RUF001", "RUF002", "RUF003", "UP040"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S104", "S105", "S106"]
 "scripts/*" = ["S310"]
+"scripts/mutate_guards.py" = ["E501", "S603"]  # mutant table; runs pytest on a temp copy
+"fuzz/*" = ["S101"]
+".semgrep/*" = ["ALL"]  # rule test cases, intentionally insecure
