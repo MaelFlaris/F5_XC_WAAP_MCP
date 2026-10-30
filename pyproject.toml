@@ -1,0 +1,47 @@
+[project]
+name = "f5xc-waap-mcp"
+version = "0.1.0"
+description = "Security-by-design MCP server for F5 Distributed Cloud WAAP (load balancers, WAF, policies, events)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "mcp==1.19.0",
+  "httpx==0.28.1",
+  "pydantic==2.11.9",
+  "pydantic-settings==2.10.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+  "pytest-asyncio==1.2.0",
+  "ruff==0.14.2",
+]
+
+[project.scripts]
+f5xc-waap-mcp = "f5xc_waap_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/f5xc_waap_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "UP040"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S104", "S105", "S106"]
+"scripts/*" = ["S310"]

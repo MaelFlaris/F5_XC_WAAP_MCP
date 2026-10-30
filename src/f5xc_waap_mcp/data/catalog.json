@@ -1,0 +1,1548 @@
+{
+ "data": {
+  "access_logs.aggregate": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/log",
+   "method": "POST",
+   "operation": "ves.io.schema.log.CustomAPI.AccessLogAggregationQuery",
+   "path": "/api/data/namespaces/{namespace}/access_logs/aggregation"
+  },
+  "access_logs.query": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/log",
+   "method": "POST",
+   "operation": "ves.io.schema.log.CustomAPI.AccessLogQueryV2",
+   "path": "/api/data/namespaces/{namespace}/access_logs"
+  },
+  "audit_logs.query": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/log",
+   "method": "POST",
+   "operation": "ves.io.schema.log.CustomAPI.AuditLogQueryV2",
+   "path": "/api/data/namespaces/{namespace}/audit_logs"
+  },
+  "http_loadbalancer.dns_info": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-http-loadbalancer",
+   "method": "GET",
+   "operation": "ves.io.schema.views.http_loadbalancer.CustomAPI.GetDnsInfo",
+   "path": "/api/config/namespaces/{namespace}/http_loadbalancers/{name}/get-dns-info"
+  },
+  "http_loadbalancer.dos_automitigation_rules": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-http-loadbalancer",
+   "method": "GET",
+   "operation": "ves.io.schema.views.http_loadbalancer.CustomAPI.GetDoSAutoMitigationRules",
+   "path": "/api/config/namespaces/{namespace}/http_loadbalancers/{name}/dos_automitigation_rules"
+  },
+  "namespace.active_service_policies": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/namespace",
+   "method": "GET",
+   "operation": "ves.io.schema.namespace.NamespaceCustomAPI.GetActiveServicePolicies",
+   "path": "/api/config/namespaces/{namespace}/active_service_policies"
+  },
+  "namespace.list": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/namespace",
+   "method": "GET",
+   "operation": "ves.io.schema.namespace.API.List",
+   "path": "/api/web/namespaces"
+  },
+  "security_events.aggregate": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
+   "method": "POST",
+   "operation": "ves.io.schema.app_security.AppSecurityMonitoringAPI.SecurityEventsAggregationQuery",
+   "path": "/api/data/namespaces/{namespace}/app_security/events/aggregation"
+  },
+  "security_events.query": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
+   "method": "POST",
+   "operation": "ves.io.schema.app_security.AppSecurityMonitoringAPI.SecurityEventsQuery",
+   "path": "/api/data/namespaces/{namespace}/app_security/events"
+  },
+  "security_incidents.query": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
+   "method": "POST",
+   "operation": "ves.io.schema.app_security.AppSecurityMonitoringAPI.SecurityIncidentsQuery",
+   "path": "/api/data/namespaces/{namespace}/app_security/incidents"
+  },
+  "suspicious_users.query": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
+   "method": "POST",
+   "operation": "ves.io.schema.app_security.AppSecurityMonitoringAPI.SuspiciousUserLogsQuery",
+   "path": "/api/data/namespaces/{namespace}/app_security/suspicious_user_logs"
+  },
+  "waf.latest_signatures_version": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/waf-signatures-changelog",
+   "method": "GET",
+   "operation": "ves.io.schema.waf_signatures_changelog.WafSignaturesAPI.GetLatestVersion",
+   "path": "/api/waf/latest-signatures-version"
+  },
+  "waf_exclusion.suggest": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
+   "method": "POST",
+   "operation": "ves.io.schema.app_security.AppSecurityWafExclusionAPI.GetSuggestedWAFExclusionRule",
+   "path": "/api/config/namespaces/{namespace}/http_loadbalancers/{name}/waf_exclusion/suggestion"
+  }
+ },
+ "kinds": {
+  "alert_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/alert-policy",
+   "family": "observability",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/alert_policys",
+    "get": "/api/config/namespaces/{namespace}/alert_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/alert_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/alert_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "notification_parameters",
+    "receivers",
+    "routes"
+   ],
+   "writable": false
+  },
+  "alert_receiver": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/alert-receiver",
+   "family": "observability",
+   "oneofs": {
+    "receiver": [
+     "email",
+     "opsgenie",
+     "pagerduty",
+     "slack",
+     "sms",
+     "webhook"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/alert_receivers",
+    "get": "/api/config/namespaces/{namespace}/alert_receivers/{name}",
+    "list": "/api/config/namespaces/{namespace}/alert_receivers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/alert_receivers/{metadata.name}"
+   },
+   "sensitive": true,
+   "spec_fields": [
+    "email",
+    "opsgenie",
+    "pagerduty",
+    "slack",
+    "sms",
+    "webhook"
+   ],
+   "writable": false
+  },
+  "api_crawler": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/api-sec-api-crawler",
+   "family": "api_security",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/api_crawlers",
+    "get": "/api/config/namespaces/{namespace}/api_crawlers/{name}",
+    "list": "/api/config/namespaces/{namespace}/api_crawlers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/api_crawlers/{metadata.name}"
+   },
+   "sensitive": true,
+   "spec_fields": [
+    "domains"
+   ],
+   "writable": false
+  },
+  "api_definition": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-api-definition",
+   "family": "api_security",
+   "oneofs": {
+    "schema_updates_strategy": [
+     "mixed_schema_origin",
+     "strict_schema_origin"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/api_definitions",
+    "get": "/api/config/namespaces/{namespace}/api_definitions/{name}",
+    "list": "/api/config/namespaces/{namespace}/api_definitions",
+    "replace": "/api/config/namespaces/{metadata.namespace}/api_definitions/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "api_groups",
+    "api_inventory_exclusion_list",
+    "api_inventory_inclusion_list",
+    "mixed_schema_origin",
+    "non_api_endpoints",
+    "strict_schema_origin",
+    "swagger_specs"
+   ],
+   "writable": true
+  },
+  "api_discovery": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/api-sec-api-discovery",
+   "family": "api_security",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/api_discoverys",
+    "get": "/api/config/namespaces/{namespace}/api_discoverys/{name}",
+    "list": "/api/config/namespaces/{namespace}/api_discoverys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/api_discoverys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "custom_auth_types",
+    "user_defined_api_discovery_policy"
+   ],
+   "writable": true
+  },
+  "api_testing": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/api-sec-api-testing",
+   "family": "api_security",
+   "oneofs": {
+    "frequency_choice": [
+     "every_day",
+     "every_month",
+     "every_week"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/api_testings",
+    "get": "/api/config/namespaces/{namespace}/api_testings/{name}",
+    "list": "/api/config/namespaces/{namespace}/api_testings",
+    "replace": "/api/config/namespaces/{metadata.namespace}/api_testings/{metadata.name}"
+   },
+   "sensitive": true,
+   "spec_fields": [
+    "custom_header_value",
+    "domains",
+    "every_day",
+    "every_month",
+    "every_week"
+   ],
+   "writable": false
+  },
+  "app_api_group": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-app-api-group",
+   "family": "api_security",
+   "oneofs": {
+    "scope_choice": [
+     "bigip_virtual_server",
+     "cdn_loadbalancer",
+     "http_loadbalancer"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/app_api_groups",
+    "get": "/api/config/namespaces/{namespace}/app_api_groups/{name}",
+    "list": "/api/config/namespaces/{namespace}/app_api_groups",
+    "replace": "/api/config/namespaces/{metadata.namespace}/app_api_groups/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "api_endpoints_count",
+    "bigip_virtual_server",
+    "cdn_loadbalancer",
+    "elements",
+    "http_loadbalancer"
+   ],
+   "writable": true
+  },
+  "app_firewall": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-firewall",
+   "family": "waf",
+   "oneofs": {
+    "allowed_response_codes_choice": [
+     "allow_all_response_codes",
+     "allowed_response_codes"
+    ],
+    "anonymization_setting": [
+     "custom_anonymization",
+     "default_anonymization",
+     "disable_anonymization"
+    ],
+    "blocking_page_choice": [
+     "blocking_page",
+     "use_default_blocking_page"
+    ],
+    "bot_protection_choice": [
+     "bot_protection_setting",
+     "default_bot_setting"
+    ],
+    "detection_setting_choice": [
+     "default_detection_settings",
+     "detection_settings"
+    ],
+    "enforcement_mode_choice": [
+     "blocking",
+     "monitoring"
+    ],
+    "enhance_with_ai_choice": [
+     "disable_ai_enhancements",
+     "enable_ai_enhancements"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/app_firewalls",
+    "get": "/api/config/namespaces/{namespace}/app_firewalls/{name}",
+    "list": "/api/config/namespaces/{namespace}/app_firewalls",
+    "replace": "/api/config/namespaces/{metadata.namespace}/app_firewalls/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "allow_all_response_codes",
+    "allowed_response_codes",
+    "blocking",
+    "blocking_page",
+    "bot_protection_setting",
+    "custom_anonymization",
+    "default_anonymization",
+    "default_bot_setting",
+    "default_detection_settings",
+    "detection_settings",
+    "disable_ai_enhancements",
+    "disable_anonymization",
+    "enable_ai_enhancements",
+    "monitoring",
+    "use_default_blocking_page"
+   ],
+   "writable": true
+  },
+  "app_setting": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-setting",
+   "family": "bot_and_users",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/app_settings",
+    "get": "/api/config/namespaces/{namespace}/app_settings/{name}",
+    "list": "/api/config/namespaces/{namespace}/app_settings",
+    "replace": "/api/config/namespaces/{metadata.namespace}/app_settings/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "app_type_settings"
+   ],
+   "writable": true
+  },
+  "app_type": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/app-type",
+   "family": "bot_and_users",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/app_types",
+    "get": "/api/config/namespaces/{namespace}/app_types/{name}",
+    "list": "/api/config/namespaces/{namespace}/app_types",
+    "replace": "/api/config/namespaces/{metadata.namespace}/app_types/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "business_logic_markup_setting",
+    "features"
+   ],
+   "writable": true
+  },
+  "bot_defense_app_infrastructure": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-bot-defense-app-infrastructure",
+   "family": "bot_and_users",
+   "oneofs": {
+    "infra_choice": [
+     "cloud_hosted",
+     "data_center_hosted"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/bot_defense_app_infrastructures",
+    "get": "/api/config/namespaces/{namespace}/bot_defense_app_infrastructures/{name}",
+    "list": "/api/config/namespaces/{namespace}/bot_defense_app_infrastructures",
+    "replace": "/api/config/namespaces/{metadata.namespace}/bot_defense_app_infrastructures/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "cloud_hosted",
+    "data_center_hosted",
+    "environment_type",
+    "traffic_type"
+   ],
+   "writable": false
+  },
+  "cdn_loadbalancer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-cdn-loadbalancer",
+   "family": "load_balancing",
+   "oneofs": {
+    "api_definition_choice": [
+     "api_specification",
+     "disable_api_definition"
+    ],
+    "api_discovery_choice": [
+     "disable_api_discovery",
+     "enable_api_discovery"
+    ],
+    "bot_defense_choice": [
+     "bot_defense"
+    ],
+    "challenge_type": [
+     "captcha_challenge",
+     "enable_challenge",
+     "js_challenge",
+     "no_challenge",
+     "policy_based_challenge"
+    ],
+    "client_side_defense_choice": [
+     "client_side_defense",
+     "disable_client_side_defense"
+    ],
+    "ip_reputation_choice": [
+     "disable_ip_reputation",
+     "enable_ip_reputation"
+    ],
+    "l7_ddos_auto_mitigation_action": [
+     "l7_ddos_action_block",
+     "l7_ddos_action_default",
+     "l7_ddos_action_js_challenge"
+    ],
+    "loadbalancer_type": [
+     "http",
+     "https",
+     "https_auto_cert"
+    ],
+    "malicious_user_detection_choice": [
+     "disable_malicious_user_detection",
+     "enable_malicious_user_detection"
+    ],
+    "rate_limit_choice": [
+     "api_rate_limit",
+     "disable_rate_limit",
+     "rate_limit"
+    ],
+    "sensitive_data_policy_choice": [
+     "default_sensitive_data_policy",
+     "sensitive_data_policy"
+    ],
+    "service_policy_choice": [
+     "active_service_policies",
+     "no_service_policies",
+     "service_policies_from_namespace"
+    ],
+    "slow_ddos_mitigation_choice": [
+     "slow_ddos_mitigation",
+     "system_default_timeouts"
+    ],
+    "threat_mesh_choice": [
+     "disable_threat_mesh",
+     "enable_threat_mesh"
+    ],
+    "user_id_choice": [
+     "user_id_client_ip",
+     "user_identification"
+    ],
+    "waf_choice": [
+     "app_firewall",
+     "disable_waf"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/cdn_loadbalancers",
+    "get": "/api/config/namespaces/{namespace}/cdn_loadbalancers/{name}",
+    "list": "/api/config/namespaces/{namespace}/cdn_loadbalancers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/cdn_loadbalancers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "active_service_policies",
+    "api_rate_limit",
+    "api_specification",
+    "app_firewall",
+    "auto_cert_info",
+    "blocked_clients",
+    "bot_defense",
+    "captcha_challenge",
+    "cert_state",
+    "client_side_defense",
+    "cors_policy",
+    "csrf_policy",
+    "custom_cache_rule",
+    "data_guard_rules",
+    "ddos_mitigation_rules",
+    "default_cache_action",
+    "default_sensitive_data_policy",
+    "disable_api_definition",
+    "disable_api_discovery",
+    "disable_client_side_defense",
+    "disable_ip_reputation",
+    "disable_malicious_user_detection",
+    "disable_rate_limit",
+    "disable_threat_mesh",
+    "disable_waf",
+    "dns_info",
+    "domains",
+    "enable_api_discovery",
+    "enable_challenge",
+    "enable_ip_reputation",
+    "enable_malicious_user_detection",
+    "enable_threat_mesh",
+    "graphql_rules",
+    "host_name",
+    "http",
+    "https",
+    "https_auto_cert",
+    "js_challenge",
+    "jwt_validation",
+    "l7_ddos_action_block",
+    "l7_ddos_action_default",
+    "l7_ddos_action_js_challenge",
+    "no_challenge",
+    "no_service_policies",
+    "origin_pool",
+    "other_settings",
+    "policy_based_challenge",
+    "protected_cookies",
+    "rate_limit",
+    "sensitive_data_policy",
+    "service_domains",
+    "service_policies_from_namespace",
+    "slow_ddos_mitigation",
+    "state",
+    "system_default_timeouts",
+    "trusted_clients",
+    "user_id_client_ip",
+    "user_identification",
+    "waf_exclusion"
+   ],
+   "writable": true
+  },
+  "certificate": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/certificate",
+   "family": "load_balancing",
+   "oneofs": {
+    "ocsp_stapling_choice": [
+     "custom_hash_algorithms",
+     "disable_ocsp_stapling",
+     "use_system_defaults"
+    ],
+    "provider": [
+     "manual",
+     "virtual_host_auto_cert"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/certificates",
+    "get": "/api/config/namespaces/{namespace}/certificates/{name}",
+    "list": "/api/config/namespaces/{namespace}/certificates",
+    "replace": "/api/config/namespaces/{metadata.namespace}/certificates/{metadata.name}"
+   },
+   "sensitive": true,
+   "spec_fields": [
+    "certificate_chain",
+    "certificate_url",
+    "custom_hash_algorithms",
+    "disable_ocsp_stapling",
+    "http_loadbalancers",
+    "infos",
+    "manual",
+    "private_key",
+    "tcp_loadbalancers",
+    "use_system_defaults",
+    "virtual_host_auto_cert"
+   ],
+   "writable": false
+  },
+  "data_type": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/data-type",
+   "family": "api_security",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/data_types",
+    "get": "/api/config/namespaces/{namespace}/data_types/{name}",
+    "list": "/api/config/namespaces/{namespace}/data_types",
+    "replace": "/api/config/namespaces/{metadata.namespace}/data_types/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "compliances",
+    "is_pii",
+    "is_sensitive_data",
+    "rules",
+    "type"
+   ],
+   "writable": false
+  },
+  "dns_lb_health_check": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/dns-lb-health-check",
+   "family": "dns",
+   "oneofs": {
+    "health_check": [
+     "http_health_check",
+     "https_health_check",
+     "icmp_health_check",
+     "tcp_health_check",
+     "tcp_hex_health_check",
+     "udp_health_check"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/dns/namespaces/{metadata.namespace}/dns_lb_health_checks",
+    "get": "/api/config/dns/namespaces/{namespace}/dns_lb_health_checks/{name}",
+    "list": "/api/config/dns/namespaces/{namespace}/dns_lb_health_checks",
+    "replace": "/api/config/dns/namespaces/{metadata.namespace}/dns_lb_health_checks/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "dns_lb_pools",
+    "http_health_check",
+    "https_health_check",
+    "icmp_health_check",
+    "tcp_health_check",
+    "tcp_hex_health_check",
+    "udp_health_check"
+   ],
+   "writable": false
+  },
+  "dns_lb_pool": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/dns-lb-pool",
+   "family": "dns",
+   "oneofs": {
+    "pool_type_choice": [
+     "a_pool",
+     "aaaa_pool",
+     "cname_pool",
+     "mx_pool",
+     "srv_pool"
+    ],
+    "ttl_choice": [
+     "ttl",
+     "use_rrset_ttl"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/dns/namespaces/{metadata.namespace}/dns_lb_pools",
+    "get": "/api/config/dns/namespaces/{namespace}/dns_lb_pools/{name}",
+    "list": "/api/config/dns/namespaces/{namespace}/dns_lb_pools",
+    "replace": "/api/config/dns/namespaces/{metadata.namespace}/dns_lb_pools/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "a_pool",
+    "aaaa_pool",
+    "cname_pool",
+    "dns_load_balancers",
+    "load_balancing_mode",
+    "mx_pool",
+    "srv_pool",
+    "ttl",
+    "use_rrset_ttl"
+   ],
+   "writable": false
+  },
+  "dns_load_balancer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/dns-load-balancer",
+   "family": "dns",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/dns/namespaces/{metadata.namespace}/dns_load_balancers",
+    "get": "/api/config/dns/namespaces/{namespace}/dns_load_balancers/{name}",
+    "list": "/api/config/dns/namespaces/{namespace}/dns_load_balancers",
+    "replace": "/api/config/dns/namespaces/{metadata.namespace}/dns_load_balancers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "dns_zones",
+    "fallback_pool",
+    "record_type",
+    "response_cache",
+    "rule_list"
+   ],
+   "writable": false
+  },
+  "dns_zone": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/dns-zone",
+   "family": "dns",
+   "oneofs": {
+    "dns_type": [
+     "primary",
+     "secondary"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/dns/namespaces/{metadata.namespace}/dns_zones",
+    "get": "/api/config/dns/namespaces/{namespace}/dns_zones/{name}",
+    "list": "/api/config/dns/namespaces/{namespace}/dns_zones",
+    "replace": "/api/config/dns/namespaces/{metadata.namespace}/dns_zones/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "domain",
+    "num_of_dns_records",
+    "primary",
+    "secondary"
+   ],
+   "writable": false
+  },
+  "enhanced_firewall_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/enhanced-firewall-policy",
+   "family": "network_security",
+   "oneofs": {
+    "rule_choice": [
+     "allow_all",
+     "allowed_destinations",
+     "allowed_sources",
+     "denied_destinations",
+     "denied_sources",
+     "deny_all",
+     "rule_list"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/enhanced_firewall_policys",
+    "get": "/api/config/namespaces/{namespace}/enhanced_firewall_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/enhanced_firewall_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/enhanced_firewall_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "allow_all",
+    "allowed_destinations",
+    "allowed_sources",
+    "denied_destinations",
+    "denied_sources",
+    "deny_all",
+    "rule_list"
+   ],
+   "writable": false
+  },
+  "fast_acl": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/fast-acl",
+   "family": "network_security",
+   "oneofs": {
+    "site_choice": [
+     "re_acl",
+     "site_acl"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/fast_acls",
+    "get": "/api/config/namespaces/{namespace}/fast_acls/{name}",
+    "list": "/api/config/namespaces/{namespace}/fast_acls",
+    "replace": "/api/config/namespaces/{metadata.namespace}/fast_acls/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "protocol_policer",
+    "re_acl",
+    "site_acl"
+   ],
+   "writable": false
+  },
+  "forward_proxy_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-forward-proxy-policy",
+   "family": "policies",
+   "oneofs": {
+    "proxy_choice": [
+     "any_proxy",
+     "drp_http_connect",
+     "network_connector",
+     "proxy_label_selector"
+    ],
+    "rule_choice": [
+     "allow_all",
+     "allow_list",
+     "deny_list",
+     "rule_list"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/forward_proxy_policys",
+    "get": "/api/config/namespaces/{namespace}/forward_proxy_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/forward_proxy_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/forward_proxy_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "allow_all",
+    "allow_list",
+    "any_proxy",
+    "deny_list",
+    "drp_http_connect",
+    "network_connector",
+    "proxy_label_selector",
+    "rule_list"
+   ],
+   "writable": false
+  },
+  "geo_location_set": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/geo-location-set",
+   "family": "dns",
+   "oneofs": {
+    "location_choice": [
+     "custom_geo_location_selector",
+     "global"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/dns/namespaces/{metadata.namespace}/geo_location_sets",
+    "get": "/api/config/dns/namespaces/{namespace}/geo_location_sets/{name}",
+    "list": "/api/config/dns/namespaces/{namespace}/geo_location_sets",
+    "replace": "/api/config/dns/namespaces/{metadata.namespace}/geo_location_sets/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "custom_geo_location_selector",
+    "dns_load_balancers",
+    "global"
+   ],
+   "writable": false
+  },
+  "global_log_receiver": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/global-log-receiver",
+   "family": "observability",
+   "oneofs": {
+    "filter_choice": [
+     "ns_all",
+     "ns_current",
+     "ns_list"
+    ],
+    "log_type": [
+     "audit_logs",
+     "dns_logs",
+     "request_logs",
+     "security_events"
+    ],
+    "receiver": [
+     "aws_cloud_watch_receiver",
+     "azure_event_hubs_receiver",
+     "azure_receiver",
+     "datadog_receiver",
+     "gcp_bucket_receiver",
+     "http_receiver",
+     "kafka_receiver",
+     "new_relic_receiver",
+     "qradar_receiver",
+     "s3_receiver",
+     "splunk_receiver",
+     "sumo_logic_receiver"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/global_log_receivers",
+    "get": "/api/config/namespaces/{namespace}/global_log_receivers/{name}",
+    "list": "/api/config/namespaces/{namespace}/global_log_receivers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/global_log_receivers/{metadata.name}"
+   },
+   "sensitive": true,
+   "spec_fields": [
+    "audit_logs",
+    "aws_cloud_watch_receiver",
+    "azure_event_hubs_receiver",
+    "azure_receiver",
+    "datadog_receiver",
+    "dns_logs",
+    "gcp_bucket_receiver",
+    "http_receiver",
+    "kafka_receiver",
+    "new_relic_receiver",
+    "ns_all",
+    "ns_current",
+    "ns_list",
+    "qradar_receiver",
+    "request_logs",
+    "s3_receiver",
+    "security_events",
+    "splunk_receiver",
+    "sumo_logic_receiver"
+   ],
+   "writable": false
+  },
+  "healthcheck": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/healthcheck",
+   "family": "load_balancing",
+   "oneofs": {
+    "health_check": [
+     "http_health_check",
+     "tcp_health_check",
+     "udp_icmp_health_check"
+    ],
+    "jitter_choice": [
+     "default_jitter",
+     "jitter_percent"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/healthchecks",
+    "get": "/api/config/namespaces/{namespace}/healthchecks/{name}",
+    "list": "/api/config/namespaces/{namespace}/healthchecks",
+    "replace": "/api/config/namespaces/{metadata.namespace}/healthchecks/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "default_jitter",
+    "healthy_threshold",
+    "http_health_check",
+    "interval",
+    "jitter_percent",
+    "tcp_health_check",
+    "timeout",
+    "udp_icmp_health_check",
+    "unhealthy_threshold"
+   ],
+   "writable": true
+  },
+  "http_loadbalancer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-http-loadbalancer",
+   "family": "load_balancing",
+   "oneofs": {
+    "advertise_choice": [
+     "advertise_custom",
+     "advertise_dualstack_on_public",
+     "advertise_on_public",
+     "advertise_on_public_default_vip",
+     "advertise_v6_on_public",
+     "do_not_advertise"
+    ],
+    "api_definition_choice": [
+     "api_specification",
+     "disable_api_definition"
+    ],
+    "api_discovery_choice": [
+     "disable_api_discovery",
+     "enable_api_discovery"
+    ],
+    "api_testing_choice": [
+     "api_testing",
+     "disable_api_testing"
+    ],
+    "bot_defense_choice": [
+     "bot_defense",
+     "bot_defense_advanced_protection",
+     "disable_bot_defense"
+    ],
+    "cache_options": [
+     "caching_policy",
+     "disable_caching"
+    ],
+    "challenge_type": [
+     "captcha_challenge",
+     "enable_challenge",
+     "js_challenge",
+     "no_challenge",
+     "policy_based_challenge"
+    ],
+    "client_side_defense_choice": [
+     "client_side_defense",
+     "disable_client_side_defense"
+    ],
+    "hash_policy_choice": [
+     "cookie_stickiness",
+     "least_active",
+     "random",
+     "ring_hash",
+     "round_robin",
+     "source_ip_stickiness"
+    ],
+    "ip_reputation_choice": [
+     "disable_ip_reputation",
+     "enable_ip_reputation"
+    ],
+    "l7_ddos_auto_mitigation_action": [
+     "l7_ddos_action_block",
+     "l7_ddos_action_default",
+     "l7_ddos_action_js_challenge"
+    ],
+    "loadbalancer_type": [
+     "http",
+     "https",
+     "https_auto_cert"
+    ],
+    "malicious_user_detection_choice": [
+     "disable_malicious_user_detection",
+     "enable_malicious_user_detection"
+    ],
+    "malware_protection": [
+     "disable_malware_protection",
+     "malware_protection_settings"
+    ],
+    "ml_config_choice": [
+     "multi_lb_app",
+     "single_lb_app"
+    ],
+    "origin_pool_choice": [
+     "default_pool",
+     "default_pool_list"
+    ],
+    "rate_limit_choice": [
+     "api_rate_limit",
+     "disable_rate_limit",
+     "rate_limit"
+    ],
+    "sensitive_data_policy_choice": [
+     "default_sensitive_data_policy",
+     "sensitive_data_policy"
+    ],
+    "service_policy_choice": [
+     "active_service_policies",
+     "no_service_policies",
+     "service_policies_from_namespace"
+    ],
+    "slow_ddos_mitigation_choice": [
+     "slow_ddos_mitigation",
+     "system_default_timeouts"
+    ],
+    "threat_mesh_choice": [
+     "disable_threat_mesh",
+     "enable_threat_mesh"
+    ],
+    "trust_client_ip_headers_choice": [
+     "disable_trust_client_ip_headers",
+     "enable_trust_client_ip_headers"
+    ],
+    "user_id_choice": [
+     "user_id_client_ip",
+     "user_identification"
+    ],
+    "waf_choice": [
+     "app_firewall",
+     "disable_waf"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/http_loadbalancers",
+    "get": "/api/config/namespaces/{namespace}/http_loadbalancers/{name}",
+    "list": "/api/config/namespaces/{namespace}/http_loadbalancers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/http_loadbalancers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "active_service_policies",
+    "add_location",
+    "advertise_custom",
+    "advertise_dualstack_on_public",
+    "advertise_on_public",
+    "advertise_on_public_default_vip",
+    "advertise_v6_on_public",
+    "api_protection_rules",
+    "api_rate_limit",
+    "api_specification",
+    "api_testing",
+    "app_firewall",
+    "auto_cert_info",
+    "blocked_clients",
+    "bot_defense",
+    "bot_defense_advanced_protection",
+    "caching_policy",
+    "captcha_challenge",
+    "cert_state",
+    "client_side_defense",
+    "cookie_stickiness",
+    "cors_policy",
+    "csrf_policy",
+    "data_guard_rules",
+    "ddos_mitigation_rules",
+    "default_pool",
+    "default_pool_list",
+    "default_route_pools",
+    "default_sensitive_data_policy",
+    "disable_api_definition",
+    "disable_api_discovery",
+    "disable_api_testing",
+    "disable_bot_defense",
+    "disable_caching",
+    "disable_client_side_defense",
+    "disable_ip_reputation",
+    "disable_malicious_user_detection",
+    "disable_malware_protection",
+    "disable_rate_limit",
+    "disable_threat_mesh",
+    "disable_trust_client_ip_headers",
+    "disable_waf",
+    "dns_info",
+    "do_not_advertise",
+    "domains",
+    "enable_api_discovery",
+    "enable_challenge",
+    "enable_ip_reputation",
+    "enable_malicious_user_detection",
+    "enable_threat_mesh",
+    "enable_trust_client_ip_headers",
+    "graphql_rules",
+    "host_name",
+    "http",
+    "https",
+    "https_auto_cert",
+    "internet_vip_info",
+    "js_challenge",
+    "jwt_validation",
+    "l7_ddos_action_block",
+    "l7_ddos_action_default",
+    "l7_ddos_action_js_challenge",
+    "l7_ddos_protection",
+    "least_active",
+    "malware_protection_settings",
+    "more_option",
+    "multi_lb_app",
+    "no_challenge",
+    "no_service_policies",
+    "origin_server_subset_rule_list",
+    "policy_based_challenge",
+    "protected_cookies",
+    "random",
+    "rate_limit",
+    "ring_hash",
+    "round_robin",
+    "routes",
+    "sensitive_data_disclosure_rules",
+    "sensitive_data_policy",
+    "service_policies_from_namespace",
+    "single_lb_app",
+    "slow_ddos_mitigation",
+    "source_ip_stickiness",
+    "state",
+    "system_default_timeouts",
+    "trusted_clients",
+    "user_id_client_ip",
+    "user_identification",
+    "waf_exclusion"
+   ],
+   "writable": true
+  },
+  "ip_prefix_set": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/ip-prefix-set",
+   "family": "policies",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/ip_prefix_sets",
+    "get": "/api/config/namespaces/{namespace}/ip_prefix_sets/{name}",
+    "list": "/api/config/namespaces/{namespace}/ip_prefix_sets",
+    "replace": "/api/config/namespaces/{metadata.namespace}/ip_prefix_sets/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "ipv4_prefixes"
+   ],
+   "writable": true
+  },
+  "malicious_user_mitigation": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/malicious-user-mitigation",
+   "family": "bot_and_users",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/malicious_user_mitigations",
+    "get": "/api/config/namespaces/{namespace}/malicious_user_mitigations/{name}",
+    "list": "/api/config/namespaces/{namespace}/malicious_user_mitigations",
+    "replace": "/api/config/namespaces/{metadata.namespace}/malicious_user_mitigations/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "mitigation_type"
+   ],
+   "writable": true
+  },
+  "network_firewall": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/network-firewall",
+   "family": "network_security",
+   "oneofs": {
+    "fast_acl_choice": [
+     "active_fast_acls",
+     "disable_fast_acl"
+    ],
+    "forward_proxy_policy_choice": [
+     "active_forward_proxy_policies",
+     "disable_forward_proxy_policy"
+    ],
+    "network_policy_choice": [
+     "active_enhanced_firewall_policies",
+     "active_network_policies",
+     "disable_network_policy"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/network_firewalls",
+    "get": "/api/config/namespaces/{namespace}/network_firewalls/{name}",
+    "list": "/api/config/namespaces/{namespace}/network_firewalls",
+    "replace": "/api/config/namespaces/{metadata.namespace}/network_firewalls/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "active_enhanced_firewall_policies",
+    "active_fast_acls",
+    "active_forward_proxy_policies",
+    "active_network_policies",
+    "disable_fast_acl",
+    "disable_forward_proxy_policy",
+    "disable_network_policy"
+   ],
+   "writable": false
+  },
+  "origin_pool": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-origin-pool",
+   "family": "load_balancing",
+   "oneofs": {
+    "health_check_port_choice": [
+     "health_check_port",
+     "same_as_endpoint_port"
+    ],
+    "port_choice": [
+     "automatic_port",
+     "lb_port",
+     "port"
+    ],
+    "tls_choice": [
+     "no_tls",
+     "use_tls"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/origin_pools",
+    "get": "/api/config/namespaces/{namespace}/origin_pools/{name}",
+    "list": "/api/config/namespaces/{namespace}/origin_pools",
+    "replace": "/api/config/namespaces/{metadata.namespace}/origin_pools/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "advanced_options",
+    "automatic_port",
+    "endpoint_selection",
+    "health_check_port",
+    "healthcheck",
+    "lb_port",
+    "loadbalancer_algorithm",
+    "no_tls",
+    "origin_servers",
+    "port",
+    "same_as_endpoint_port",
+    "upstream_conn_pool_reuse_type",
+    "use_tls"
+   ],
+   "writable": true
+  },
+  "policer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/policer",
+   "family": "policies",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/policers",
+    "get": "/api/config/namespaces/{namespace}/policers/{name}",
+    "list": "/api/config/namespaces/{namespace}/policers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/policers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "burst_size",
+    "committed_information_rate",
+    "policer_mode",
+    "policer_type"
+   ],
+   "writable": false
+  },
+  "protocol_policer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/protocol-policer",
+   "family": "policies",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/protocol_policers",
+    "get": "/api/config/namespaces/{namespace}/protocol_policers/{name}",
+    "list": "/api/config/namespaces/{namespace}/protocol_policers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/protocol_policers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "protocol_policer"
+   ],
+   "writable": false
+  },
+  "rate_limiter": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/rate-limiter",
+   "family": "policies",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/rate_limiters",
+    "get": "/api/config/namespaces/{namespace}/rate_limiters/{name}",
+    "list": "/api/config/namespaces/{namespace}/rate_limiters",
+    "replace": "/api/config/namespaces/{metadata.namespace}/rate_limiters/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "limits",
+    "user_identification"
+   ],
+   "writable": true
+  },
+  "rate_limiter_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-rate-limiter-policy",
+   "family": "policies",
+   "oneofs": {
+    "server_choice": [
+     "any_server",
+     "server_name",
+     "server_name_matcher",
+     "server_selector"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/rate_limiter_policys",
+    "get": "/api/config/namespaces/{namespace}/rate_limiter_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/rate_limiter_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/rate_limiter_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "any_server",
+    "rules",
+    "server_name",
+    "server_name_matcher",
+    "server_selector"
+   ],
+   "writable": true
+  },
+  "sensitive_data_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/sensitive-data-policy",
+   "family": "api_security",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/sensitive_data_policys",
+    "get": "/api/config/namespaces/{namespace}/sensitive_data_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/sensitive_data_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/sensitive_data_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "compliances",
+    "custom_data_types",
+    "disabled_predefined_data_types"
+   ],
+   "writable": true
+  },
+  "service_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/service-policy",
+   "family": "policies",
+   "oneofs": {
+    "rule_choice": [
+     "allow_all_requests",
+     "allow_list",
+     "deny_all_requests",
+     "deny_list",
+     "legacy_rule_list",
+     "rule_list"
+    ],
+    "server_choice": [
+     "any_server",
+     "server_name",
+     "server_name_matcher",
+     "server_selector"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/service_policys",
+    "get": "/api/config/namespaces/{namespace}/service_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/service_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/service_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "allow_all_requests",
+    "allow_list",
+    "any_server",
+    "deny_all_requests",
+    "deny_list",
+    "legacy_rule_list",
+    "rule_list",
+    "server_name",
+    "server_name_matcher",
+    "server_selector"
+   ],
+   "writable": true
+  },
+  "service_policy_rule": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/service-policy-rule",
+   "family": "policies",
+   "oneofs": {
+    "asn_choice": [
+     "any_asn",
+     "asn_list",
+     "asn_matcher"
+    ],
+    "client_choice": [
+     "any_client",
+     "client_name",
+     "client_name_matcher",
+     "client_selector",
+     "ip_threat_category_list"
+    ],
+    "dst_asn_choice": [],
+    "dst_ip_choice": [],
+    "ip_choice": [
+     "any_ip",
+     "ip_matcher",
+     "ip_prefix_list"
+    ],
+    "tls_fingerprint_choice": [
+     "ja4_tls_fingerprint",
+     "tls_fingerprint_matcher"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/service_policy_rules",
+    "get": "/api/config/namespaces/{namespace}/service_policy_rules/{name}",
+    "list": "/api/config/namespaces/{namespace}/service_policy_rules",
+    "replace": "/api/config/namespaces/{metadata.namespace}/service_policy_rules/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "action",
+    "any_asn",
+    "any_client",
+    "any_ip",
+    "api_group_matcher",
+    "arg_matchers",
+    "asn_list",
+    "asn_matcher",
+    "body_matcher",
+    "bot_action",
+    "client_name",
+    "client_name_matcher",
+    "client_selector",
+    "cookie_matchers",
+    "domain_matcher",
+    "expiration_timestamp",
+    "headers",
+    "http_method",
+    "ip_matcher",
+    "ip_prefix_list",
+    "ip_threat_category_list",
+    "ja4_tls_fingerprint",
+    "jwt_claims",
+    "label_matcher",
+    "log_rule_evaluation",
+    "mum_action",
+    "path",
+    "port_matcher",
+    "query_params",
+    "request_constraints",
+    "segment_policy",
+    "tls_fingerprint_matcher",
+    "waf_action"
+   ],
+   "writable": false
+  },
+  "tcp_loadbalancer": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-tcp-loadbalancer",
+   "family": "load_balancing",
+   "oneofs": {
+    "advertise_choice": [
+     "advertise_custom",
+     "advertise_on_public",
+     "advertise_on_public_default_vip",
+     "do_not_advertise"
+    ],
+    "cluster_retract_choice": [
+     "do_not_retract_cluster",
+     "retract_cluster"
+    ],
+    "hash_policy_choice": [
+     "hash_policy_choice_least_active",
+     "hash_policy_choice_random",
+     "hash_policy_choice_round_robin",
+     "hash_policy_choice_source_ip_stickiness"
+    ],
+    "loadbalancer_type": [
+     "tcp",
+     "tls_tcp",
+     "tls_tcp_auto_cert"
+    ],
+    "port_choice": [
+     "listen_port",
+     "port_ranges"
+    ],
+    "service_policy_choice": [
+     "active_service_policies",
+     "no_service_policies",
+     "service_policies_from_namespace"
+    ],
+    "sni_default_lb_choice": [
+     "default_lb_with_sni",
+     "no_sni",
+     "sni"
+    ]
+   },
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/tcp_loadbalancers",
+    "get": "/api/config/namespaces/{namespace}/tcp_loadbalancers/{name}",
+    "list": "/api/config/namespaces/{namespace}/tcp_loadbalancers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/tcp_loadbalancers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "active_service_policies",
+    "advertise_custom",
+    "advertise_on_public",
+    "advertise_on_public_default_vip",
+    "auto_cert_info",
+    "cert_state",
+    "default_lb_with_sni",
+    "dns_info",
+    "dns_volterra_managed",
+    "do_not_advertise",
+    "do_not_retract_cluster",
+    "domains",
+    "hash_policy_choice_least_active",
+    "hash_policy_choice_random",
+    "hash_policy_choice_round_robin",
+    "hash_policy_choice_source_ip_stickiness",
+    "host_name",
+    "idle_timeout",
+    "internet_vip_info",
+    "listen_port",
+    "no_service_policies",
+    "no_sni",
+    "origin_pools_weights",
+    "port_ranges",
+    "retract_cluster",
+    "service_policies_from_namespace",
+    "sni",
+    "tcp",
+    "tls_tcp",
+    "tls_tcp_auto_cert"
+   ],
+   "writable": true
+  },
+  "trusted_ca_list": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/trusted-ca-list",
+   "family": "load_balancing",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/trusted_ca_lists",
+    "get": "/api/config/namespaces/{namespace}/trusted_ca_lists/{name}",
+    "list": "/api/config/namespaces/{namespace}/trusted_ca_lists",
+    "replace": "/api/config/namespaces/{metadata.namespace}/trusted_ca_lists/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "infos",
+    "trusted_ca_url"
+   ],
+   "writable": false
+  },
+  "user_identification": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/user-identification",
+   "family": "bot_and_users",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/user_identifications",
+    "get": "/api/config/namespaces/{namespace}/user_identifications/{name}",
+    "list": "/api/config/namespaces/{namespace}/user_identifications",
+    "replace": "/api/config/namespaces/{metadata.namespace}/user_identifications/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "rules"
+   ],
+   "writable": true
+  },
+  "waf_exclusion_policy": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/waf-exclusion-policy",
+   "family": "waf",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/waf_exclusion_policys",
+    "get": "/api/config/namespaces/{namespace}/waf_exclusion_policys/{name}",
+    "list": "/api/config/namespaces/{namespace}/waf_exclusion_policys",
+    "replace": "/api/config/namespaces/{metadata.namespace}/waf_exclusion_policys/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "waf_exclusion_rules"
+   ],
+   "writable": true
+  }
+ },
+ "source": "https://docs.cloud.f5.com/docs-v2/api"
+}
