@@ -1,4 +1,4 @@
-"""Entry point: ``f5xc-waap-mcp`` or ``python -m f5xc_waap_mcp``."""
+"""Entry point: ``f5xc-waap-mcp`` (serve) or ``f5xc-waap-mcp check`` (tenant prerequisites)."""
 
 from __future__ import annotations
 
@@ -7,19 +7,29 @@ import sys
 
 from pydantic import ValidationError
 
-from .config import get_settings
+from .config import Settings, Transport, get_settings
 from .server import build_server, run
 
 
 def main() -> int:
+    checking = sys.argv[1:2] == ["check"]
     try:
-        settings = get_settings()
+        # ``check`` uses the operator's own F5XC_API_TOKEN and serves nothing,
+        # whatever the transport configured for the server.
+        settings = (
+            Settings(transport=Transport.STDIO, bind_host="127.0.0.1")  # type: ignore[call-arg]
+            if checking else get_settings()
+        )
     except ValidationError as exc:
         # Field names and messages only, never the values (they may be tokens).
         for err in exc.errors(include_input=False, include_url=False):
             location = ".".join(str(p) for p in err.get("loc", ())) or "settings"
             sys.stderr.write(f"f5xc-waap-mcp: configuration error: {location}: {err.get('msg')}\n")
         return 2
+    if checking:
+        from .check import main as check_main
+
+        return check_main(settings)
     mcp, rt = build_server(settings)
     sys.stderr.write(json.dumps({
         "event": "startup", "tenant": settings.tenant, "mode": settings.mode, "transport": settings.transport,

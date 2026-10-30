@@ -9,7 +9,10 @@ policies), journaux de sécurité, journal d'audit du serveur.
 | Spoofing / DoS | Faux tokens pour épuiser les quotas ou solliciter XC | Validation `whoami` avant tout quota ; cache négatif 60 s ; limite globale des validations de tokens inconnus ; limite par IP sur le reverse proxy | `identity.py`, README |
 | Spoofing | DNS rebinding vers le serveur local | Bind loopback par défaut (hors loopback seulement avec `F5XC_MCP_ALLOW_NON_LOOPBACK_BIND` et une liste `Host` explicite) ; protection Host/Origin du SDK MCP (403) | `config.py`, `server.py` |
 | Tampering | Arguments du modèle (injection de chemin, de requête de logs) | Schémas stricts (enums fermées, regex de nom XC, bornes) ; segments d'URL revalidés ; valeurs de filtres sans `" { } \` | `tools/common.py`, `catalog.py` |
-| Tampering | Payload modifié entre plan et apply | Le corps est construit et conservé côté serveur ; `apply_plan` ne prend qu'un `plan_id` aléatoire, à usage unique, lié à l'utilisateur, avec un TTL ; refus si l'objet a changé depuis le plan | `plans.py`, `tools/changes.py` |
+| Tampering | Payload modifié entre plan et apply | Le corps est construit et conservé côté serveur ; `apply_plan` ne prend qu'un `plan_id` aléatoire, à usage unique, lié à l'utilisateur, avec un TTL | `plans.py`, `tools/changes.py` |
+| Tampering | Modification concurrente entre plan et apply (spec, `disable`, labels, objet recréé) | Empreinte spec + métadonnées réécrites par le PUT + `uid`, recalculée juste avant le PUT ; plan refusé si elle diffère | `tools/changes.py` |
+| Elevation of privilege | Exclusion WAF large présentée comme anodine | Chaque règle nouvelle ou modifiée est évaluée ; HIGH RISK sauf signatures précises sur domaine et chemin précis | `tools/changes.py` |
+| Elevation of privilege | Création d'un objet déjà référencé par son nom (activation immédiate) | Recherche des références dans le namespace (LB, service policies actives, origin pools selon le type) ; HIGH RISK si trouvé ou si la recherche est incomplète | `tools/changes.py` |
 | Tampering | L'humain valide un nom et non un changement ; diff tronqué ou maquillé | Le message d'élicitation, construit par le serveur, contient le diff complet, le SHA-256 du corps et un bandeau HIGH RISK ; diff exhaustif feuille par feuille (règles appariées par nom, ordre signalé), valeurs et clés échappées en JSON ; un diff trop gros ou touchant un secret refuse le plan ; HIGH RISK exige de retaper le préfixe du hash | `plans.py`, `tools/changes.py` |
 | Elevation of privilege | Réécriture arbitraire d'un LB, d'une origin pool ou d'une policy | Pas de remplacement générique : outils ciblés seulement ; création limitée aux objets inertes tant qu'ils ne sont pas référencés | `tools/changes.py` |
 | Repudiation | Action non imputable | Audit JSON nominatif (utilisateur XC, UUID, session aléatoire) : `tool_call` pour chaque appel, puis `plan_created`, `plan_confirmation` (issue) et `plan_applied` reliés par `plan_id` et `body_sha256` ; fichier en `0600`, compatible rotation ; `query_audit_logs` XC comme contrôle compensatoire | `audit.py`, `runtime.py` |
@@ -32,6 +35,14 @@ policies), journaux de sécurité, journal d'audit du serveur.
   global de validations (`F5XC_MCP_AUTH_RATE_PER_MINUTE`) et bloquer temporairement
   l'arrivée de nouveaux utilisateurs. Les utilisateurs déjà en cache ne sont pas
   touchés. La limite par IP sur le reverse proxy est la parade.
+- **Fenêtre entre contrôle et PUT.** L'API XC publiée n'offre ni `resource_version` ni
+  `If-Match` sur le PUT (vérifié dans la référence). Une modification faite par un tiers
+  entre la relecture de contrôle et le PUT (quelques dizaines de millisecondes) serait
+  écrasée. Elle reste visible dans `query_audit_logs` côté XC.
+- **Recherche de références à la création.** Elle couvre les types qui référencent
+  habituellement l'objet créé, dans le même namespace, dans la limite de 50 objets par
+  type (au-delà, HIGH RISK « incomplète »). Un référent d'un autre type ou d'un autre
+  namespace ne serait pas vu.
 - **Risque des `ip_prefix_set`.** Le serveur ne sait pas si une liste sert à bloquer ou
   à autoriser : toute modification est marquée HIGH RISK par précaution.
 - **Heuristiques de posture.** Les constats de `get_lb_security_posture` sont des

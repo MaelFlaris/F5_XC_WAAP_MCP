@@ -72,6 +72,14 @@ jobs:
         run: |
           docker run -d --name smoke --read-only --cap-drop=ALL --security-opt no-new-privileges \
             -e F5XC_TENANT=ci -e F5XC_ALLOWED_NAMESPACES=prod f5xc-waap-mcp:ci
-          sleep 5
+          for i in $(seq 1 30); do
+            docker logs smoke 2>&1 | grep -q 'Application startup complete' && break
+            sleep 1
+          done
           docker logs smoke 2>&1 | grep -q '"event": "startup"'
+          docker logs smoke 2>&1 | grep -q 'Application startup complete'
           docker rm -f smoke
+      - name: Tenant check command is available in the image
+        run: |
+          docker run --rm --network none -e F5XC_TENANT=ci -e F5XC_ALLOWED_NAMESPACES=prod \
+            -e F5XC_API_TOKEN=DummyTokenForCiOnly-0000 f5xc-waap-mcp:ci check | grep -q '"ok": false'

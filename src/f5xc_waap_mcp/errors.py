@@ -27,6 +27,7 @@ def scrub(text: str, limit: int = 200) -> str:
 class Code(StrEnum):
     UNAUTHENTICATED = "unauthenticated"
     AUTH_RATE_LIMITED = "auth_rate_limited"
+    IDENTITY_UNAVAILABLE = "identity_unavailable"
     NAMESPACE_FORBIDDEN = "namespace_forbidden"
     NAMESPACE_PROTECTED = "namespace_protected"
     KIND_NOT_WRITABLE = "kind_not_writable"
@@ -57,6 +58,8 @@ class Code(StrEnum):
 MESSAGES: dict[Code, str] = {
     Code.UNAUTHENTICATED: "No usable F5 XC credential for this request.",
     Code.AUTH_RATE_LIMITED: "Too many token validations, retry later.",
+    Code.IDENTITY_UNAVAILABLE: "The F5 XC user behind this token could not be identified (whoami); no call is made "
+                               "without a named identity.",
     Code.NAMESPACE_FORBIDDEN: "Namespace is not in the server allow-list.",
     Code.NAMESPACE_PROTECTED: "Namespace is protected and cannot be modified through this server.",
     Code.KIND_NOT_WRITABLE: "This object kind is read-only in this server.",

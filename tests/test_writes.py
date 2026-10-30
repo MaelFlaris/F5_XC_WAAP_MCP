@@ -170,11 +170,14 @@ async def test_create_limited_to_inert_kinds(write_harness, xc):
 async def test_create_object(write_harness, xc):
     path = "/api/config/namespaces/prod/ip_prefix_sets"
     xc.add("POST", path, {})
+    for kind in ("service_policys", "http_loadbalancers", "cdn_loadbalancers"):
+        xc.add("GET", f"/api/config/namespaces/prod/{kind}", {"items": []})
     plan, applied = await plan_then_apply(write_harness, "plan_create_object", {
         "kind": "ip_prefix_set", "namespace": "prod", "name": "new-set",
         "spec": {"ipv4_prefixes": [{"ipv4_prefix": "203.0.113.0/24"}]}, "labels": {"owner": "secops"}},
         Human("new-set"))
     assert not applied.isError
+    assert plan["risk"] == "standard"
     assert plan["diff_text"] == '+ spec.ipv4_prefixes[0].ipv4_prefix = "203.0.113.0/24"'
     assert xc.bodies(path)[0]["metadata"] == {"labels": {"owner": "secops"}, "name": "new-set", "namespace": "prod"}
 
@@ -307,3 +310,107 @@ async def test_waf_exclusion_rule(write_harness, xc):
 async def test_read_mode_harness_has_no_write_path():
     harness = Harness(make_settings(), FakeXC())
     assert "apply_plan" not in harness.runtime.registered
+
+
+# --- WAF exclusion risk, per rule (review 3, item 1) ---------------------------------
+PRECISE = {"metadata": {"name": "fp-ok"}, "exact_value": "a.example", "path_prefix": "/search",
+           "app_firewall_detection_control": {"exclude_signature_contexts": [
+               {"signature_id": 200001234, "context": "CONTEXT_PARAMETER", "context_name": "q"}]}}
+
+
+@pytest.mark.parametrize(("change", "reason"), [
+    ({"any_domain": {}, "exact_value": None}, "any domain"),
+    ({"any_path": {}, "path_prefix": None}, "any path"),
+    ({"exact_value": None}, "any domain"),                     # no domain choice at all
+    ({"path_regex": "^/.*$", "path_prefix": None}, "path regex"),
+    ({"app_firewall_detection_control": {"exclude_attack_type_contexts": [
+        {"exclude_attack_type": "ATTACK_TYPE_SQL_INJECTION", "context": "CONTEXT_ANY"}]}}, "whole attack types"),
+    ({"app_firewall_detection_control": {"exclude_violation_contexts": [
+        {"exclude_violation": "VIOL_HTTP_PROTOCOL", "context": "CONTEXT_ANY"}]}}, "violations"),
+    ({"app_firewall_detection_control": {"exclude_bot_name_contexts": [{"bot_name": "curl"}]}}, "bot names"),
+])
+async def test_broad_waf_exclusions_are_high_risk(write_harness, xc, change, reason):
+    rule = {k: v for k, v in {**PRECISE, **change}.items() if v is not None}
+    xc.add("GET", LB, replace_form({"domains": ["a.example"]}))
+    plan = result_json(await write_harness.call("plan_add_waf_exclusion_rule", {
+        "namespace": "prod", "name": "shop", "rule": rule}))["data"]
+    assert plan["risk"] == "HIGH", plan["risks"]
+    assert any(reason in r for r in plan["risks"])
+
+
+async def test_existing_broad_rule_does_not_flag_a_new_precise_one(write_harness, xc):
+    broad = {"metadata": {"name": "legacy"}, "any_domain": {}, "any_path": {},
+             "app_firewall_detection_control": {"exclude_violation_contexts": [{"exclude_violation": "VIOL_X"}]}}
+    xc.add("GET", LB, replace_form({"waf_exclusion": {"waf_exclusion_inline_rules": {"rules": [broad]}}}))
+    plan = result_json(await write_harness.call("plan_add_waf_exclusion_rule", {
+        "namespace": "prod", "name": "shop", "rule": PRECISE}))["data"]
+    assert plan["risk"] == "standard", plan["risks"]
+
+
+async def test_waf_exclusion_policy_creation_is_assessed(write_harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers", {"items": []})
+    xc.add("GET", "/api/config/namespaces/prod/cdn_loadbalancers", {"items": []})
+    broad = {k: v for k, v in PRECISE.items() if k != "exact_value"} | {"any_domain": {}}
+    plan = result_json(await write_harness.call("plan_create_object", {
+        "kind": "waf_exclusion_policy", "namespace": "prod", "name": "wep",
+        "spec": {"waf_exclusion_rules": [broad]}}))["data"]
+    assert plan["risk"] == "HIGH" and any("any domain" in r for r in plan["risks"])
+
+
+# --- staleness covers metadata and uid (items 3 and 4) -------------------------------
+@pytest.mark.parametrize("second", [
+    {"replace_form": {"metadata": {"name": "x", "namespace": "prod", "labels": {"a": "b"}, "disable": True},
+                      "spec": {"monitoring": {}}}},
+    {"replace_form": {"metadata": {"name": "x", "namespace": "prod", "labels": {"a": "changed"}},
+                      "spec": {"monitoring": {}}}},
+    {"replace_form": {"metadata": {"name": "x", "namespace": "prod", "labels": {"a": "b"}},
+                      "spec": {"monitoring": {}}}, "system_metadata": {"uid": "recreated"}},
+])
+async def test_metadata_or_uid_change_makes_plan_stale(write_harness, xc, second):
+    first = {**replace_form({"monitoring": {}}), "system_metadata": {"uid": "original"}}
+    if "system_metadata" not in second:
+        second = {**second, "system_metadata": {"uid": "original"}}
+    states = iter([first, second])
+    xc.add("GET", FW, lambda request: httpx.Response(200, json=next(states)))
+    _, applied = await plan_then_apply(write_harness, "plan_set_waf_mode",
+                                       {"namespace": "prod", "name": "fw1", "mode": "blocking"}, Human("fw1"))
+    assert "plan_stale" in error_text(applied)
+    assert puts(xc) == []
+
+
+# --- creation: existing references (item 5) ------------------------------------------
+async def test_creation_already_referenced_by_a_load_balancer_is_high_risk(write_harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers", {"items": [{"name": "shop"}]})
+    xc.add("GET", "/api/config/namespaces/prod/cdn_loadbalancers", {"items": []})
+    xc.add("GET", LB, {"spec": {"app_firewall": {"name": "fw-new", "namespace": "prod"}}})
+    plan = result_json(await write_harness.call("plan_create_object", {
+        "kind": "app_firewall", "namespace": "prod", "name": "fw-new", "spec": {"monitoring": {}}}))["data"]
+    assert plan["risk"] == "HIGH"
+    assert any("http_loadbalancer prod/shop (app_firewall)" in r for r in plan["risks"])
+
+
+async def test_service_policy_already_active_in_namespace_is_high_risk(write_harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/active_service_policies",
+           {"service_policies": [{"name": "sp-new", "namespace": "prod"}]})
+    for kind in ("http_loadbalancers", "cdn_loadbalancers", "tcp_loadbalancers"):
+        xc.add("GET", f"/api/config/namespaces/prod/{kind}", {"items": []})
+    plan = result_json(await write_harness.call("plan_create_object", {
+        "kind": "service_policy", "namespace": "prod", "name": "sp-new", "spec": {}}))["data"]
+    assert any("active service policies" in r for r in plan["risks"])
+
+
+async def test_incomplete_reference_scan_is_high_risk(write_harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers", (403, {}))
+    xc.add("GET", "/api/config/namespaces/prod/cdn_loadbalancers", {"items": []})
+    plan = result_json(await write_harness.call("plan_create_object", {
+        "kind": "app_firewall", "namespace": "prod", "name": "fw-new", "spec": {"blocking": {}}}))["data"]
+    assert any("incomplete" in r for r in plan["risks"])
+
+
+async def test_unreferenced_creation_is_standard(write_harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers", {"items": [{"name": "shop"}]})
+    xc.add("GET", "/api/config/namespaces/prod/cdn_loadbalancers", {"items": []})
+    xc.add("GET", LB, {"spec": {"app_firewall": {"name": "fw-other", "namespace": "prod"}}})
+    plan = result_json(await write_harness.call("plan_create_object", {
+        "kind": "app_firewall", "namespace": "prod", "name": "fw-new", "spec": {"blocking": {}}}))["data"]
+    assert plan["risk"] == "standard", plan["risks"]

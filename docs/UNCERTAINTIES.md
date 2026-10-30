@@ -18,11 +18,19 @@ vérifiés sur un tenant de test (token en lecture seule d'abord).
    renvoyée proprement).
 4. **Clé `waf_mode` dans les événements**, et forme exacte d'une règle d'exclusion
    suggérée par XC : à vérifier avec un vrai faux positif.
-5. **`whoami` avec un token API.** La référence décrit cet appel comme basé sur le
-   « username header from the request context ». Il faut vérifier qu'il renvoie bien
-   l'utilisateur propriétaire d'un **API token** (et pas seulement d'une session console),
-   et quels champs (`email`, `user_uuid`, `type`) sont remplis pour un token personnel
-   et pour une service credential.
-6. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
+5. **`whoami` avec un token API — à tester en premier, dépendance critique.** La
+   référence décrit cet appel comme basé sur le « username header from the request
+   context ». Il faut vérifier, avec `f5xc-waap-mcp check` :
+   - qu'il renvoie bien le propriétaire d'un **API token** (pas seulement d'une session
+     console) ; sinon personne ne peut s'authentifier (`identity_unavailable`) ;
+   - qu'un rôle limité aux namespaces applicatifs peut l'appeler sur
+     `namespaces/system` ; un 403 est remonté en `identity_unavailable`, sans cache ;
+   - quels champs (`email`, `user_uuid`, `type`) sont remplis pour un token personnel
+     et pour une service credential.
+6. **Références vers des objets inexistants.** La recherche avant création suppose que
+   XC accepte qu'un LB ou une policy référence un objet qui n'existe pas encore (le
+   format de réponse `GET_RSP_FORMAT_BROKEN_REFERENCES` le suggère). La liste des types
+   référents (`REFERENCERS` dans `tools/changes.py`) est à valider.
+7. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
    (seulement `label_filter` / `report_fields`). Le serveur tronque à
    `F5XC_MCP_MAX_ITEMS` et l'indique (`truncated: true`).

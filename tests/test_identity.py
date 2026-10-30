@@ -88,3 +88,53 @@ def test_audit_file_is_private_and_survives_rotation(tmp_path):
     log.emit(event="two")
     assert "two" in path.read_text() and "one" in (tmp_path / "audit.jsonl.1").read_text()
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+async def test_whoami_403_is_identity_unavailable_and_not_cached():
+    harness, xc = harness_with_token("LimitedRoleToken-0000000001")
+    xc.add("GET", WHOAMI, (403, {"message": "forbidden"}))
+    for _ in range(2):
+        text = error_text(await harness.call("list_objects", {"kind": "app_firewall", "namespace": "prod"}))
+        assert "identity_unavailable" in text and "f5xc-waap-mcp check" in text
+    assert len([r for r in xc.requests if r.url.path == WHOAMI]) == 2  # not negatively cached
+    assert xc.api_requests == []
+
+
+async def test_whoami_without_user_is_identity_unavailable():
+    harness, xc = harness_with_token("SessionOnlyToken-00000000001")
+    xc.users["SessionOnlyToken-00000000001"] = {"type": "USER"}
+    assert "identity_unavailable" in error_text(await harness.call("list_objects", {
+        "kind": "app_firewall", "namespace": "prod"}))
+
+
+async def test_check_command_reports_identity_and_namespace_access():
+    import httpx
+
+    from f5xc_waap_mcp.check import run_check
+    from f5xc_waap_mcp.xc_client import XCClient
+
+    xc = FakeXC()
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers", {"items": [{"name": "a"}, {"name": "b"}]})
+    xc.add("GET", "/api/config/namespaces/prod/active_service_policies", {"service_policies": []})
+    xc.add("GET", "/api/config/namespaces/staging/http_loadbalancers", (403, {}))
+    settings = make_settings(allowed_namespaces=("prod", "staging"))
+    report = await run_check(settings, XCClient(settings, transport=httpx.MockTransport(xc.handler)))
+    assert report["ok"] is True
+    assert report["identity"]["user"] == "alice@example.com"
+    assert set(report["identity"]["whoami_fields_present"]) >= {"email", "user_uuid", "type"}
+    assert report["namespaces"]["prod"]["list_http_loadbalancers"] == {"ok": True, "count": 2}
+    assert report["namespaces"]["staging"]["list_http_loadbalancers"]["http_status"] == 403
+    assert make_settings().api_token.get_secret_value() not in str(report)
+
+
+async def test_check_command_fails_when_whoami_is_forbidden():
+    import httpx
+
+    from f5xc_waap_mcp.check import run_check
+    from f5xc_waap_mcp.xc_client import XCClient
+
+    xc = FakeXC()
+    xc.add("GET", WHOAMI, (403, {}))
+    settings = make_settings(allowed_namespaces=("prod",))
+    report = await run_check(settings, XCClient(settings, transport=httpx.MockTransport(xc.handler)))
+    assert report["ok"] is False and report["identity"]["http_status"] == 403

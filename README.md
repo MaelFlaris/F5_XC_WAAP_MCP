@@ -58,8 +58,14 @@ Le message d'élicitation est construit par le serveur, pas par le modèle. Il c
 
 - un bandeau `!!! HIGH RISK !!!` avec les raisons quand le changement baisse la
   protection : WAF désactivé ou passé en monitoring, WAF attaché en monitoring,
-  bot / IP reputation / rate limit désactivés, trusted clients modifiés, exclusion de
-  toutes les signatures, modification d'un `ip_prefix_set` (qui peut servir d'allowlist) ;
+  bot / IP reputation / rate limit désactivés, trusted clients modifiés, modification
+  d'un `ip_prefix_set` (qui peut servir d'allowlist), création d'un objet déjà référencé
+  (il devient actif immédiatement) ou dont la recherche de références est incomplète ;
+- pour les exclusions WAF, chaque règle nouvelle ou modifiée est évaluée. Elle n'est
+  « standard » que si elle exclut des signatures précises sur un domaine et un chemin
+  précis. Sinon elle est HIGH RISK : `any_domain`, `any_path`, domaine ou chemin absent,
+  `path_regex`, exclusion de types d'attaque, de violations ou de bots, `signature_id`
+  0, ou `waf_skip_processing` ;
 - la cible, la requête (`PUT /api/config/...`) et le **SHA-256 du corps** envoyé ;
 - le **diff complet**, feuille par feuille. Les règles nommées sont appariées par nom et
   un changement d'ordre est signalé. Les valeurs sont échappées en JSON (caractères de
@@ -74,8 +80,16 @@ faut alors découper le changement. Un changement qui touche un champ secret (cl
 privée, mot de passe, token...) est refusé.
 
 Un plan est à usage unique, lié à l'utilisateur XC qui l'a créé, et expire après
-5 minutes. Il est refusé si l'objet a changé entre le plan et l'application. Les
-namespaces `system` et `shared` ne sont jamais modifiés.
+5 minutes.
+
+Il est refusé si l'objet a changé entre le plan et l'application. Le contrôle couvre la
+spec, les métadonnées réécrites par le PUT (`labels`, `annotations`, `description`,
+`disable`) et l'`uid`, ce qui détecte un objet supprimé puis recréé.
+
+L'API XC publiée n'offre pas de précondition de version sur le PUT. Il reste donc une
+fenêtre courte entre la relecture de contrôle et le PUT ; voir le modèle de menaces.
+
+Les namespaces `system` et `shared` ne sont jamais modifiés.
 
 ## Installation
 
@@ -110,6 +124,21 @@ pytest
 | `F5XC_MCP_ALLOW_SERVICE_CREDENTIALS` | `false` | Accepte les service credentials (comptes non nominatifs) |
 | `F5XC_MCP_AUDIT_LOG` | stderr | Fichier du journal d'audit JSON (créé en `0600`, compatible logrotate) |
 
+### Premier test sur un tenant : `f5xc-waap-mcp check`
+
+À lancer **avant toute mise en service**, avec le token personnel d'un utilisateur qui a
+le rôle prévu pour le serveur :
+
+```bash
+F5XC_TENANT=acme-corp F5XC_ALLOWED_NAMESPACES=prod,staging F5XC_API_TOKEN=... f5xc-waap-mcp check
+```
+
+La commande appelle `whoami` et indique quels champs sont remplis (`name`, `email`,
+`user_uuid`, `type`) et l'identité retenue. Puis, pour chaque namespace autorisé, elle
+indique si le rôle peut lister les LB HTTP et lire les service policies actives. Elle
+n'écrit rien et n'affiche jamais le token. Code de sortie 1 si l'identité ne peut pas
+être résolue : dans ce cas, le serveur refusera tous les appels.
+
 ### Token, identité et droits
 
 Crée un **token API personnel** dans la console XC (Account > Credentials). Le serveur
@@ -118,7 +147,10 @@ autre appel :
 
 - l'audit et les quotas utilisent le nom, l'e-mail et l'UUID XC, pas le token ;
 - une rotation de token ne change donc pas l'identité ;
-- un token refusé par XC est mis en cache négatif 60 s et ne consomme aucun quota ;
+- un token refusé par XC (401) est mis en cache négatif 60 s et ne consomme aucun
+  quota. Un 403 sur `whoami` (rôle qui ne peut pas lire le namespace `system`) donne
+  l'erreur `identity_unavailable`, sans cache négatif : une correction du rôle
+  s'applique tout de suite ;
 - les validations de tokens inconnus sont limitées globalement ;
 - les service credentials sont refusées par défaut.
 

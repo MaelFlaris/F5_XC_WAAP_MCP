@@ -96,9 +96,18 @@ class IdentityResolver:
         try:
             payload = await self._client.request(method, path, token)
         except SecureError as exc:
-            if exc.code is Code.UPSTREAM_FORBIDDEN:
+            if exc.status == 401:
+                # The token itself is rejected: cache the refusal.
                 self._store(key, None, now)
-                raise SecureError(Code.UNAUTHENTICATED, "Token rejected by F5 XC.", detail=exc.detail) from exc
+                raise SecureError(Code.UNAUTHENTICATED, "Token rejected by F5 XC.", detail=exc.detail,
+                                  status=401) from exc
+            if exc.status == 403:
+                # Token possibly valid but its role cannot read namespaces/system/whoami
+                # (e.g. a role limited to application namespaces). Not cached: fixing the
+                # role must take effect immediately. See docs/UNCERTAINTIES.md.
+                raise SecureError(Code.IDENTITY_UNAVAILABLE,
+                                  "F5 XC answered 403 on whoami: check that the user's role allows it "
+                                  "(run 'f5xc-waap-mcp check').", detail=exc.detail, status=403) from exc
             raise
         principal = self._principal(payload)
         self._store(key, principal, now)
@@ -106,11 +115,12 @@ class IdentityResolver:
 
     def _principal(self, payload: Any) -> Principal:
         if not isinstance(payload, dict):
-            raise SecureError(Code.UNAUTHENTICATED, detail="whoami: unexpected payload")
+            raise SecureError(Code.IDENTITY_UNAVAILABLE, detail="whoami: unexpected payload")
         user = text(payload.get("email") or payload.get("name"), 254)
         user_type = text(payload.get("type") or "USER", 20)
         if not user:
-            raise SecureError(Code.UNAUTHENTICATED, detail="whoami: no user name")
+            # e.g. whoami answers for a console session but not for an API token
+            raise SecureError(Code.IDENTITY_UNAVAILABLE, detail="whoami: no user name or e-mail")
         if payload.get("disabled") is True or payload.get("state") in ("StateDisabled", "StateCreateFailed"):
             raise SecureError(Code.UNAUTHENTICATED, "The F5 XC user is disabled.")
         if user_type == "SERVICE" and not self._settings.allow_service_credentials:

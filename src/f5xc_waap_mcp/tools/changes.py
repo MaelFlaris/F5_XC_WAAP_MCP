@@ -16,6 +16,7 @@ them. There is no generic replace and no delete. Protected namespaces (system,
 shared) are never written.
 """
 
+import asyncio
 import copy
 import ipaddress
 import json
@@ -52,6 +53,22 @@ CREATABLE_KINDS = (
 )
 CreatableKind = Literal[CREATABLE_KINDS]  # type: ignore[valid-type]
 
+WRITABLE_METADATA = ("labels", "annotations", "description", "disable")
+
+# Creation: kinds whose objects could already reference the new name (XC keeps
+# references to objects that do not exist, cf. the GET_RSP_FORMAT_BROKEN_REFERENCES
+# response format). They are scanned in the target namespace before planning.
+REFERENCERS: dict[str, tuple[str, ...]] = {
+    "app_firewall": ("http_loadbalancer", "cdn_loadbalancer"),
+    "waf_exclusion_policy": ("http_loadbalancer", "cdn_loadbalancer"),
+    "service_policy": ("http_loadbalancer", "cdn_loadbalancer", "tcp_loadbalancer"),
+    "rate_limiter_policy": ("http_loadbalancer", "cdn_loadbalancer"),
+    "rate_limiter": ("http_loadbalancer", "cdn_loadbalancer", "rate_limiter_policy"),
+    "ip_prefix_set": ("service_policy", "http_loadbalancer", "cdn_loadbalancer"),
+    "healthcheck": ("origin_pool",),
+}
+MAX_SCANNED_PER_KIND = 50
+
 LB_DOWNGRADES = {
     "disable_waf": "WAF disabled on the load balancer",
     "disable_bot_defense": "bot defense disabled",
@@ -86,6 +103,49 @@ def set_oneof(k: catalog.Kind, spec: dict[str, Any], group: str, choice: str, va
     spec[choice] = value
 
 
+def _exclusion_rules(node: Any, out: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """WAF exclusion rules (policySimpleWafExclusionRule) found anywhere in a spec."""
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        if "app_firewall_detection_control" in node or "waf_skip_processing" in node:
+            out.append(node)
+            return out
+        for value in node.values():
+            _exclusion_rules(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _exclusion_rules(value, out)
+    return out
+
+
+def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
+    """A WAF exclusion is low risk only when it targets precise signatures on a precise
+    domain and path. Anything broader effectively switches part of the WAF off.
+    Field names: policySimpleWafExclusionRule / policyAppFirewallDetectionControl."""
+    meta = rule.get("metadata") if isinstance(rule.get("metadata"), dict) else {}
+    label = f"WAF exclusion '{meta.get('name', '?')}'"
+    reasons = []
+    if "waf_skip_processing" in rule:
+        reasons.append(f"{label} skips all WAF processing")
+    if "any_domain" in rule or not any(k in rule for k in ("exact_value", "suffix_value")):
+        reasons.append(f"{label} applies to any domain")
+    if "any_path" in rule or not any(k in rule for k in ("path_prefix", "path_regex")):
+        reasons.append(f"{label} applies to any path")
+    if "path_regex" in rule:
+        reasons.append(f"{label} uses a path regex (scope hard to review)")
+    control = rule.get("app_firewall_detection_control")
+    control = control if isinstance(control, dict) else {}
+    for key, what in (("exclude_attack_type_contexts", "whole attack types"),
+                      ("exclude_violation_contexts", "violations"),
+                      ("exclude_bot_name_contexts", "bot names")):
+        if control.get(key):
+            reasons.append(f"{label} excludes {what}")
+    signatures = control.get("exclude_signature_contexts") or []
+    if any(isinstance(sig, dict) and sig.get("signature_id") in (0, "0") for sig in signatures):
+        reasons.append(f"{label} excludes ALL signatures (signature_id 0)")
+    return reasons
+
+
 def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: list[dict[str, Any]]) -> list[str]:
     """Reasons for a HIGH RISK banner (changes that lower protection or widen access)."""
     risks: list[str] = []
@@ -95,10 +155,10 @@ def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: 
         if any(p.startswith("spec.trusted_clients") for p in paths):
             risks.append("trusted clients changed: these clients bypass security controls")
     if kind in ("http_loadbalancer", "cdn_loadbalancer", "waf_exclusion_policy"):
-        if any("waf_skip_processing" in p for p in paths):
-            risks.append("WAF exclusion skipping all WAF processing")
-        if any(p.endswith(".signature_id") and op.get("after") == "0" for p, op in zip(paths, ops, strict=True)):
-            risks.append("WAF exclusion of ALL signatures (signature_id 0)")
+        existing = {canonical_hash(rule) for rule in _exclusion_rules(before)}
+        for rule in _exclusion_rules(after):
+            if canonical_hash(rule) not in existing:  # new or modified rule
+                risks += exclusion_rule_risks(rule)
     if kind == "app_firewall" and "monitoring" in after and "monitoring" not in before and before:
         risks.append("App Firewall switched to monitoring: attacks are no longer blocked")
     if kind == "ip_prefix_set" and before and ops:
@@ -115,8 +175,15 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             raise SecureError(Code.KIND_NOT_WRITABLE)
         return k
 
-    async def current(k: catalog.Kind, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Current (metadata, spec) in replace form."""
+    async def current(k: catalog.Kind, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, Any], str]:
+        """Current (metadata, spec, version) in replace form.
+
+        ``version`` fingerprints everything the PUT sends back (spec and the
+        writable metadata: labels, annotations, description, disable) plus the
+        object uid, so a concurrent edit, a disable or a delete-and-recreate
+        between plan and apply makes the plan stale. The published API has no
+        version precondition on PUT: the remaining check-to-PUT window is
+        documented in docs/THREAT_MODEL.md."""
         obj = await rt.xc("GET", catalog.kind_path(k, "get", namespace=namespace, name=name),
                           params={"response_format": "GET_RSP_FORMAT_FOR_REPLACE"})
         if not isinstance(obj, dict):
@@ -124,18 +191,25 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         form = obj.get("replace_form") if isinstance(obj.get("replace_form"), dict) else obj
         metadata = form.get("metadata") if isinstance(form.get("metadata"), dict) else {}
         spec = form.get("spec") if isinstance(form.get("spec"), dict) else {}
-        return metadata, spec
+        system = obj.get("system_metadata") if isinstance(obj.get("system_metadata"), dict) else {}
+        version = canonical_hash({
+            "metadata": {key: metadata.get(key) for key in WRITABLE_METADATA},
+            "spec": spec,
+            "uid": system.get("uid"),
+        })
+        return metadata, spec, version
 
     def make_plan(*, k: catalog.Kind, operation: Literal["create", "replace"], namespace: str, name: str,
                   metadata: dict[str, Any], before: dict[str, Any], after: dict[str, Any], summary: str,
-                  extra_risks: list[str] | None = None) -> dict[str, Any]:
+                  version: str | None = None, extra_risks: list[str] | None = None) -> dict[str, Any]:
         ops = diff(before, after)
+        if not ops and operation == "create":
+            ops = [{"op": "add", "path": "spec", "after": "{}"}]  # creating an object is a change even if empty
         if not ops:
             raise SecureError(Code.INVALID_ARGUMENT, "The change would not modify the object.")
         risks = assess_risks(k.name, before, after, ops) + (extra_risks or [])
         if operation == "replace":
-            meta = {key: metadata[key] for key in ("labels", "annotations", "description", "disable")
-                    if key in metadata}
+            meta = {key: metadata[key] for key in WRITABLE_METADATA if key in metadata}
             method, path = "PUT", catalog.kind_path(k, "replace", namespace=namespace, name=name)
         else:
             meta = metadata
@@ -144,7 +218,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         plan = rt.plans.create(
             identity=rt.identity().key, operation=operation, kind=k.name, namespace=namespace, name=name,
             method=method, path=path, body=body,
-            base_version=canonical_hash(before) if operation == "replace" else None,
+            base_version=version,
             summary=summary, diff=ops, risks=risks,
         )
         rt.annotate(plan_id=plan.plan_id)
@@ -160,6 +234,54 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             next_step="Show the diff to the user, then call apply_plan(plan_id). The user will see the same "
                       "diff and hash in the confirmation prompt.",
         )
+
+    async def existing_references(kind: str, namespace: str, name: str) -> tuple[list[str], bool]:
+        """Objects of the namespace that already reference ``name``. Returns
+        (descriptions, complete); complete is False when the scan was truncated
+        or a read failed, which the caller reports as a risk."""
+        found: list[str] = []
+        complete = True
+
+        def matches(ref: dict[str, Any]) -> bool:
+            return ref.get("name") == name and ref.get("namespace") in (None, "", namespace)
+
+        if kind == "service_policy":
+            try:
+                method, path = catalog.data_path("namespace.active_service_policies", namespace=namespace)
+                active = await rt.xc(method, path)
+                policies = active.get("service_policies", []) if isinstance(active, dict) else []
+                if any(isinstance(p, dict) and matches(p) for p in policies):
+                    found.append(f"the active service policies of namespace {namespace}")
+            except SecureError:
+                complete = False
+        semaphore = asyncio.Semaphore(4)
+
+        async def scan(rk: catalog.Kind, obj_name: str) -> None:
+            nonlocal complete
+            async with semaphore:
+                try:
+                    obj = await rt.xc("GET", catalog.kind_path(rk, "get", namespace=namespace, name=obj_name))
+                except SecureError:
+                    complete = False
+                    return
+            spec = obj.get("spec") if isinstance(obj, dict) and isinstance(obj.get("spec"), dict) else {}
+            for ref in sanitize.collect_refs(spec):
+                if matches(ref):
+                    found.append(f"{rk.name} {namespace}/{obj_name} ({ref['field']})")
+
+        for referrer_kind in REFERENCERS.get(kind, ()):
+            rk = catalog.kind(referrer_kind)
+            try:
+                listing = await rt.xc("GET", catalog.kind_path(rk, "list", namespace=namespace))
+            except SecureError:
+                complete = False
+                continue
+            items = listing.get("items", []) if isinstance(listing, dict) else []
+            names = [i["name"] for i in items if isinstance(i, dict) and isinstance(i.get("name"), str)]
+            if len(names) > MAX_SCANNED_PER_KIND:
+                complete = False
+            await asyncio.gather(*(scan(rk, n) for n in names[:MAX_SCANNED_PER_KIND]))
+        return sorted(set(found)), complete
 
     @rt.tool(mcp, ToolClass.WRITE, title="Plan: attach or detach the WAF of a load balancer", idempotent=False)
     async def plan_set_lb_waf(
@@ -177,7 +299,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         Returns the complete diff and a plan_id; nothing changes until apply_plan."""
         k = writable("http_loadbalancer", namespace)
         extra: list[str] = []
-        metadata, before = await current(k, namespace, name)
+        metadata, before, version = await current(k, namespace, name)
         after = copy.deepcopy(before)
         if app_firewall:
             fw_namespace = app_firewall_namespace or namespace
@@ -193,7 +315,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             set_oneof(k, after, "waf_choice", "disable_waf", {})
             summary = f"DISABLE the WAF of load balancer {name}"
         return make_plan(k=k, operation="replace", namespace=namespace, name=name, metadata=metadata,
-                         before=before, after=after, summary=summary, extra_risks=extra)
+                         before=before, after=after, version=version, summary=summary, extra_risks=extra)
 
     @rt.tool(mcp, ToolClass.WRITE, title="Plan: WAF blocking or monitoring mode", idempotent=False)
     async def plan_set_waf_mode(
@@ -201,11 +323,11 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
     ) -> dict:
         """Prepare switching an App Firewall between blocking and monitoring mode."""
         k = writable("app_firewall", namespace)
-        metadata, before = await current(k, namespace, name)
+        metadata, before, version = await current(k, namespace, name)
         after = copy.deepcopy(before)
         set_oneof(k, after, "enforcement_mode_choice", mode, {})
         return make_plan(k=k, operation="replace", namespace=namespace, name=name, metadata=metadata,
-                         before=before, after=after, summary=f"set App Firewall {name} to {mode} mode")
+                         before=before, after=after, version=version, summary=f"set App Firewall {name} to {mode} mode")
 
     @rt.tool(mcp, ToolClass.WRITE, title="Plan: add/remove IP prefixes", idempotent=False)
     async def plan_update_ip_prefix_set(
@@ -238,7 +360,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         to_add, to_remove = normalize(add), set(normalize(remove))
         if not to_add and not to_remove:
             raise SecureError(Code.INVALID_ARGUMENT, "Nothing to add or remove.")
-        metadata, before = await current(k, namespace, name)
+        metadata, before, version = await current(k, namespace, name)
         after = copy.deepcopy(before)
         entries = [e for e in after.get("ipv4_prefixes", []) if isinstance(e, dict)]
         entries = [e for e in entries if e.get("ipv4_prefix") not in to_remove]
@@ -248,7 +370,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                 entries.append({"ipv4_prefix": prefix, **({"description": comment} if comment else {})})
         after["ipv4_prefixes"] = entries
         return make_plan(k=k, operation="replace", namespace=namespace, name=name, metadata=metadata,
-                         before=before, after=after,
+                         before=before, after=after, version=version,
                          summary=f"ip_prefix_set {name}: +{len(to_add)} / -{len(to_remove)} prefixes")
 
     @rt.tool(mcp, ToolClass.WRITE, title="Plan: add a WAF exclusion rule to a load balancer", idempotent=False)
@@ -275,7 +397,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             raise SecureError(Code.INVALID_ARGUMENT, "rule.metadata.name must be a valid XC name.")
         if len(json.dumps(rule)) > 16_384:
             raise SecureError(Code.INVALID_ARGUMENT, "Rule too large.")
-        metadata, before = await current(k, namespace, name)
+        metadata, before, version = await current(k, namespace, name)
         after = copy.deepcopy(before)
         exclusion = after.get("waf_exclusion") if isinstance(after.get("waf_exclusion"), dict) else {}
         if "waf_exclusion_policy" in exclusion:
@@ -288,7 +410,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         rules.append(rule)
         after["waf_exclusion"] = {"waf_exclusion_inline_rules": {"rules": rules}}
         return make_plan(k=k, operation="replace", namespace=namespace, name=name, metadata=metadata,
-                         before=before, after=after,
+                         before=before, after=after, version=version,
                          summary=f"add WAF exclusion rule {meta['name']} to load balancer {name}")
 
     @rt.tool(mcp, ToolClass.WRITE, title="Plan: create an object", idempotent=False)
@@ -306,13 +428,18 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         load balancer is a separate, reviewed change."""
         k = writable(kind, namespace)
         check_spec(k, spec)
+        referrers, complete = await existing_references(kind, namespace, name)
+        extra = [f"already referenced by {r}: creating it activates it immediately" for r in referrers]
+        if not complete:
+            extra.append("the search for existing references was incomplete: the object may become active "
+                         "as soon as it is created")
         metadata: dict[str, Any] = {}
         if description:
             metadata["description"] = description
         if labels:
             metadata["labels"] = labels
         return make_plan(k=k, operation="create", namespace=namespace, name=name, metadata=metadata,
-                         before={}, after=spec, summary=f"create {kind} {name}")
+                         before={}, after=spec, summary=f"create {kind} {name}", extra_risks=extra)
 
     @rt.tool(mcp, ToolClass.WRITE, title="Apply a planned change", idempotent=False)
     async def apply_plan(
@@ -334,8 +461,8 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         status, error = "ok", None
         try:
             if plan.operation == "replace":
-                _, latest = await current(k, plan.namespace, plan.name)
-                if canonical_hash(latest) != plan.base_version:
+                _, _, latest = await current(k, plan.namespace, plan.name)
+                if latest != plan.base_version:
                     raise SecureError(Code.PLAN_STALE)
             await rt.xc(plan.method, plan.path, body=plan.body)
         except SecureError as exc:
