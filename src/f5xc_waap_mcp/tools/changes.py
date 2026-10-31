@@ -82,7 +82,48 @@ LB_DOWNGRADES = {
     "disable_rate_limit": "rate limiting disabled",
     "disable_api_discovery": "API discovery disabled",
     "no_service_policies": "service policies removed",
+    "disable_malware_protection": "malware protection disabled",
+    "disable_client_side_defense": "client-side defense disabled",
+    "disable_api_testing": "API testing disabled",
+    "disable_api_definition": "API definition (OpenAPI validation) removed",
+    "disable_threat_mesh": "threat mesh disabled",
 }
+# Not downgrades: disable_caching (performance), disable_trust_client_ip_headers (does not
+# lower protection), no_challenge (default when no JS/captcha challenge is configured).
+
+
+def firewall_weaknesses(name: str, spec: dict[str, Any]) -> list[str]:
+    """Settings of an App Firewall that make attaching it weaker than it looks in a diff
+    that only shows its name. Only documented top-level choices are interpreted; custom
+    detection or bot settings are reported as "not shown" rather than guessed."""
+    label = f"App Firewall {shown(name)}"
+    reasons = []
+    if "monitoring" in spec:
+        reasons.append(f"{label} is in monitoring mode: attacks will not be blocked")
+    if "allow_all_response_codes" in spec:
+        reasons.append(f"{label} allows all response codes")
+    if "detection_settings" in spec:
+        reasons.append(f"{label} uses custom detection settings (not shown in this diff): review it first")
+    if "bot_protection_setting" in spec:
+        reasons.append(f"{label} uses custom bot protection settings (not shown in this diff): review it first")
+    return reasons
+
+
+def normalize_prefixes(values: list[Any] | None, minimum: int) -> list[str]:
+    """Validated IPv4 prefixes, each at least as specific as ``minimum``."""
+    out = []
+    for value in values or []:
+        if not isinstance(value, str):
+            raise SecureError(Code.INVALID_ARGUMENT, "IPv4 prefixes must be strings.")
+        try:
+            network = ipaddress.IPv4Network(value.strip(), strict=True)
+        except ValueError as exc:
+            raise SecureError(Code.INVALID_ARGUMENT,
+                              f"Invalid IPv4 prefix {value[:43]!r} (host bits must be zero).") from exc
+        if network.prefixlen < minimum:
+            raise SecureError(Code.INVALID_ARGUMENT, f"Prefix {network} is broader than /{minimum}.")
+        out.append(str(network))
+    return out
 
 
 class Confirmation(BaseModel):
@@ -175,8 +216,12 @@ def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
     return reasons
 
 
-def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: list[dict[str, Any]]) -> list[str]:
-    """Reasons for a HIGH RISK banner (changes that lower protection or widen access)."""
+def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: list[dict[str, Any]],
+                 operation: Literal["create", "replace"] = "replace") -> list[str]:
+    """Reasons for a HIGH RISK banner (changes that lower protection or widen access).
+
+    Replace vs create is decided by ``operation``, never by whether ``before`` is
+    empty: an existing object can have an empty spec."""
     risks: list[str] = []
     paths = [op["path"] for op in ops]
     if kind in ("http_loadbalancer", "cdn_loadbalancer"):
@@ -188,9 +233,9 @@ def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: 
         for rule in _exclusion_rules(after):
             if canonical_hash(rule) not in existing:  # new or modified rule
                 risks += exclusion_rule_risks(rule)
-    if kind == "app_firewall" and "monitoring" in after and "monitoring" not in before and before:
+    if kind == "app_firewall" and "monitoring" in after and "monitoring" not in before and operation == "replace":
         risks.append("App Firewall switched to monitoring: attacks are no longer blocked")
-    if kind == "ip_prefix_set" and before and ops:
+    if kind == "ip_prefix_set" and operation == "replace" and ops:
         risks.append("IP prefix set changed: it may be used as an allow-list (trusted clients, allow rules); "
                      "the server cannot tell how it is referenced")
     return risks
@@ -199,7 +244,7 @@ def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: 
 def register(mcp: FastMCP, rt: Runtime) -> None:
     def ensure_writes_enabled() -> None:
         kill = rt.settings.write_kill_switch
-        if kill and os.path.exists(kill):
+        if kill and kill_switch_set(kill):
             raise SecureError(Code.WRITES_DISABLED)
 
     def writable(kind_name: str, namespace: str) -> catalog.Kind:
@@ -242,7 +287,10 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             ops = [{"op": "add", "path": "spec", "after": "{}"}]  # creating an object is a change even if empty
         if not ops:
             raise SecureError(Code.INVALID_ARGUMENT, "The change would not modify the object.")
-        risks = assess_risks(k.name, before, after, ops) + (extra_risks or [])
+        risks = assess_risks(k.name, before, after, ops, operation) + (extra_risks or [])
+        if operation == "create" and metadata:
+            # Everything sent must be shown: description and labels too, not only the spec.
+            ops = diff({}, metadata, "metadata") + ops
         if operation == "replace":
             meta = {key: metadata[key] for key in WRITABLE_METADATA if key in metadata}
             method, path = "PUT", catalog.kind_path(k, "replace", namespace=namespace, name=name)
@@ -341,8 +389,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             fw = await rt.xc("GET", catalog.kind_path(catalog.kind("app_firewall"), "get", namespace=fw_namespace,
                                                       name=app_firewall))
             fw_spec = fw.get("spec") if isinstance(fw, dict) and isinstance(fw.get("spec"), dict) else {}
-            if "monitoring" in fw_spec:
-                extra.append(f"App Firewall {app_firewall} is in monitoring mode: attacks will not be blocked")
+            extra += firewall_weaknesses(app_firewall, fw_spec)
             set_oneof(k, after, "waf_choice", "app_firewall", {"name": app_firewall, "namespace": fw_namespace})
             summary = f"attach App Firewall {fw_namespace}/{app_firewall} to load balancer {name}"
         else:
@@ -377,21 +424,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         server minimum (default /16)."""
         k = writable("ip_prefix_set", namespace)
         minimum = rt.settings.min_ipv4_prefix_len
-
-        def normalize(values: list[str] | None) -> list[str]:
-            out = []
-            for value in values or []:
-                try:
-                    network = ipaddress.IPv4Network(value.strip(), strict=True)
-                except ValueError as exc:
-                    raise SecureError(Code.INVALID_ARGUMENT,
-                                      f"Invalid IPv4 prefix {value[:43]!r} (host bits must be zero).") from exc
-                if network.prefixlen < minimum:
-                    raise SecureError(Code.INVALID_ARGUMENT, f"Prefix {network} is broader than /{minimum}.")
-                out.append(str(network))
-            return out
-
-        to_add, to_remove = normalize(add), set(normalize(remove))
+        to_add, to_remove = normalize_prefixes(add, minimum), set(normalize_prefixes(remove, minimum))
         if not to_add and not to_remove:
             raise SecureError(Code.INVALID_ARGUMENT, "Nothing to add or remove.")
         metadata, before, version = await current(k, namespace, name)
@@ -463,6 +496,12 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         k = writable(kind, namespace)
         rt.require_kind_topic(k)
         check_spec(k, spec)
+        if kind == "ip_prefix_set":
+            # Same minimum as plan_update_ip_prefix_set: creation is not a way around it.
+            entries = spec.get("ipv4_prefixes") or []
+            if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+                raise SecureError(Code.INVALID_ARGUMENT, "ipv4_prefixes must be a list of objects.")
+            normalize_prefixes([e.get("ipv4_prefix") for e in entries], rt.settings.min_ipv4_prefix_len)
         referrers, complete = await existing_references(kind, namespace, name)
         extra = [f"already referenced by {r}: creating it activates it immediately" for r in referrers]
         if not complete:
@@ -484,6 +523,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         """Apply a change prepared by a plan_* tool. The user is shown the complete diff and body hash and
         must confirm (MCP elicitation); without an elicitation-capable client nothing is applied."""
         rt.annotate(plan_id=plan_id)
+        ensure_writes_enabled()  # before take(): a killed server does not consume plans
         plan = rt.plans.take(plan_id, rt.identity().key)
         rt.annotate(kind=plan.kind, namespace=plan.namespace, target=plan.name, operation=plan.operation,
                     body_sha256=plan.body_sha256)
@@ -493,7 +533,9 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                        else "standard", body_sha256=plan.body_sha256)
         if outcome != "approved":
             raise SecureError(Code.CONFIRMATION_REQUIRED, f"Outcome: {outcome}.")
-        status, error = "ok", None
+        # "unknown" until XC answered: a cancellation or an unexpected exception during the
+        # PUT must not be logged as a success (the PUT may or may not have reached XC).
+        status, error = "unknown", None
         try:
             if plan.operation == "replace":
                 _, _, latest = await current(k, plan.namespace, plan.name)
@@ -502,8 +544,15 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             # The kill switch may have been set while the human was reading the diff.
             ensure_writes_enabled()
             await rt.xc(plan.method, plan.path, body=plan.body)
+            status = "ok"
         except SecureError as exc:
             status, error = "error", str(exc.code)
+            raise
+        except asyncio.CancelledError:
+            error = "cancelled"
+            raise
+        except BaseException as exc:
+            error = type(exc).__name__
             raise
         finally:
             # method + path + user + ts: the keys to match this event 1:1 with the XC audit log.
@@ -570,6 +619,18 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                                  f"{record['kind']} {record['name']}", extra_risks=extra)
 
 
+def kill_switch_set(path: str) -> bool:
+    """True when the kill-switch file exists, and also when its presence cannot be
+    checked (permission error, I/O error): an unreadable switch fails closed."""
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 SECRET_MARKER = {"__f5xc_mcp_secret_kept_in_xc__": True}
 
 
@@ -579,7 +640,7 @@ def strip_secrets(node: Any) -> Any:
         return {k: SECRET_MARKER if sanitize.is_secret_key(str(k)) else strip_secrets(v) for k, v in node.items()}
     if isinstance(node, list):
         return [strip_secrets(v) for v in node]
-    if isinstance(node, str) and (node.startswith("string:///") or "-----BEGIN" in node):
+    if isinstance(node, str) and sanitize.looks_like_secret_value(node):
         return SECRET_MARKER
     return node
 

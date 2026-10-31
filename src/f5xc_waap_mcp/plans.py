@@ -25,13 +25,15 @@ from typing import Any, Literal
 
 from .errors import Code, SecureError
 
-MAX_PLANS = 256
+MAX_PLANS = 4096  # global memory bound, far above the per-identity bound
+MAX_PLANS_PER_IDENTITY = 32
 MAX_DIFF_OPS = 80
 MAX_VALUE_CHARS = 300
 MAX_RENDER_CHARS = 8000
 
 _SECRET_PATH = re.compile(
-    r"(?i)(private_key|password|passwd|secret|token|api_?key|client_secret|hmac|credential|pkcs12)"
+    r"(?i)(private_key|password|passwd|passphrase|secret|token|api_?key|access_key|pre_shared_key|"
+    r"(?:^|[._])psk(?:$|[._])|client_secret|hmac|credential|pkcs12)"
 )
 
 
@@ -78,28 +80,33 @@ class PlanStore:
             **fields,
         )
         with self._lock:
-            self._evict()
+            self._expire()
+            # Capacity is enforced per identity, at creation only: one user cannot push
+            # out another user's pending plan, and taking a plan never evicts one.
+            mine = [p for p, existing in self._plans.items() if existing.identity == plan.identity]
+            while len(mine) >= MAX_PLANS_PER_IDENTITY:
+                del self._plans[mine.pop(0)]
+            while len(self._plans) >= MAX_PLANS:
+                self._plans.pop(next(iter(self._plans)))
             self._plans[plan.plan_id] = plan
         return plan
 
     def take(self, plan_id: str, identity: str) -> Plan:
         """Remove and return the plan (single use)."""
         with self._lock:
-            self._evict()
+            self._expire()
             plan = self._plans.get(plan_id)
             if plan is None:
                 raise SecureError(Code.PLAN_UNKNOWN)
-            if not secrets.compare_digest(plan.identity, identity):
+            if not secrets.compare_digest(plan.identity.encode(), identity.encode()):
                 raise SecureError(Code.PLAN_USER_MISMATCH)
             del self._plans[plan_id]
             return plan
 
-    def _evict(self) -> None:
+    def _expire(self) -> None:
         now = time.time()
         for plan_id in [p for p, plan in self._plans.items() if plan.expires_at < now]:
             del self._plans[plan_id]
-        while len(self._plans) >= MAX_PLANS:
-            self._plans.pop(next(iter(self._plans)))
 
 
 # --- diff ---------------------------------------------------------------------

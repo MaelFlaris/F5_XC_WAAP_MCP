@@ -83,8 +83,9 @@ class XCClient:
             code = _STATUS.get(status, Code.UPSTREAM_ERROR)
             # The upstream message is not echoed back: it may contain input
             # values. It only goes to the audit detail, scrubbed.
-            raise SecureError(code, f"(HTTP {status})", detail=bytes(buffer[:300]).decode("utf-8", "replace"),
-                              status=status)
+            # The caller's token is masked literally first, whatever form an echo takes.
+            raw = bytes(buffer[:4096]).decode("utf-8", "replace").replace(token.get_secret_value(), "[redacted]")
+            raise SecureError(code, f"(HTTP {status})", detail=raw[:300], status=status)
         if not buffer:
             return {}
         try:

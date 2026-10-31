@@ -174,6 +174,14 @@ def load_spec(slug: str, cache: pathlib.Path | None) -> dict:
     return spec
 
 
+CRUD_PATH_RE = {
+    "list": re.compile(r"/api/config/(dns/)?namespaces/\{namespace\}/[a-z_]+"),
+    "get": re.compile(r"/api/config/(dns/)?namespaces/\{namespace\}/[a-z_]+/\{name\}"),
+    "create": re.compile(r"/api/config/(dns/)?namespaces/\{metadata\.namespace\}/[a-z_]+"),
+    "replace": re.compile(r"/api/config/(dns/)?namespaces/\{metadata\.namespace\}/[a-z_]+/\{metadata\.name\}"),
+}
+
+
 def crud_paths(spec: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     for path, ops in spec["paths"].items():
@@ -206,6 +214,10 @@ def main() -> int:
         missing = {"list", "get"} - set(paths)
         if missing:
             raise SystemExit(f"{kind}: missing {missing} in {slug}")
+        for op, path in paths.items():
+            # Same shapes as catalog.CRUD_PATH_RE (checked again when the package loads).
+            if not CRUD_PATH_RE[op].fullmatch(path):
+                raise SystemExit(f"{kind}: unexpected {op} path {path!r} in {slug}")
         definition = spec_definition(spec, paths["get"])
         oneofs = {
             key[len("x-ves-oneof-field-"):]: json.loads(value)

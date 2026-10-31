@@ -570,10 +570,10 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             complete = complete and ok
             for name, spec in objects:
                 infos = spec.get("infos") if isinstance(spec.get("infos"), list) else []
-                used_by = [f"http_loadbalancer/{r['name']}" for r in map(sanitize.ref, spec.get("http_loadbalancers")
-                                                                         or []) if r]
-                used_by += [f"tcp_loadbalancer/{r['name']}" for r in map(sanitize.ref, spec.get("tcp_loadbalancers")
-                                                                         or []) if r]
+                used_by = [f"http_loadbalancer/{r['name']}"
+                           for r in map(sanitize.ref, _as_list(spec.get("http_loadbalancers"))) if r]
+                used_by += [f"tcp_loadbalancer/{r['name']}"
+                            for r in map(sanitize.ref, _as_list(spec.get("tcp_loadbalancers"))) if r]
                 for info in infos[:10]:
                     if isinstance(info, dict):
                         rows.append(_cert_row(source, name, info.get("common_name"),
@@ -687,9 +687,14 @@ def _perf_row(node: dict[str, Any]) -> dict[str, Any]:
     row["healthscore"] = {
         sanitize.text(h.get("type"), 40): {"value": _last_value({"raw": h.get("value")}),
                                            "reason": sanitize.text(h.get("reason"), 200)}
-        for h in (health.get("data") or [])[:6] if isinstance(h, dict)
+        for h in _as_list(health.get("data"))[:6] if isinstance(h, dict)
     }
     return row
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Upstream value expected to be a list; anything else (malformed response) is empty."""
+    return value if isinstance(value, list) else []
 
 
 def _perf_value(row: dict[str, Any], metric: str) -> float:

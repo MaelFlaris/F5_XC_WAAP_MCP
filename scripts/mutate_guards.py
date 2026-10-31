@@ -5,7 +5,8 @@ whose removal would go unnoticed in CI. Derived from the 2026-10-30 audit
 (24/27 killed on a7b6436); guard strings updated and guards added since.
 
 Two phases per mutant: the fast unit tests, then the Hypothesis property tests
-only if the mutant survived the first phase.
+only if the mutant survived the first phase. The unmutated suite runs first (a
+broken suite would "kill" every mutant) and the umask is 022 as in CI.
 
 Usage: python -I scripts/mutate_guards.py <repo_dir> <out_json>
 Exit code 1 if any mutant survives.
@@ -31,7 +32,8 @@ MUTANTS = [
     ("guardrails.py", "if repeats >= s.loop_threshold:", "if False:", "loop detection"),
     ("identity.py", 'if payload.get("disabled") is True or payload.get("state") in ("StateDisabled", "StateCreateFailed"):', "if False:", "disabled user refused"),
     ("identity.py", 'if user_type == "SERVICE" and not self._settings.allow_service_credentials:', "if False:", "service credentials refused"),
-    ("plans.py", "if not secrets.compare_digest(plan.identity, identity):", "if False:", "plan bound to identity"),
+    ("plans.py", "if not secrets.compare_digest(plan.identity.encode(), identity.encode()):", "if False:",
+     "plan bound to identity"),
     ("plans.py", "            del self._plans[plan_id]\n            return plan", "            return plan", "plan single use"),
     ("plans.py", 'if _SECRET_PATH.search(op["path"]):', "if False:", "secret fields refused in diff"),
     ("plans.py", "if len(render(differ.ops)) > MAX_RENDER_CHARS:", "if False:", "diff size limit"),
@@ -65,7 +67,7 @@ MUTANTS = [
     ("tools/changes.py", "if isinstance(suffix, str) and is_public_suffix(suffix):", "if False:", "N5 public suffix (PSL)"),
     ("tools/changes.py", "if isinstance(signatures, list) and len(signatures) > MAX_PRECISE_SIGNATURES:", "if False:", "F-02 mass signature exclusion"),
     ("tools/changes.py", "            if not scanned_all:\n                complete = False", "            if not scanned_all:\n                pass", "F-03 incomplete scan reported"),
-    ("tools/changes.py", "if kill and os.path.exists(kill):", "if False:", "G kill switch"),
+    ("tools/changes.py", "if kill and kill_switch_set(kill):", "if False:", "G kill switch"),
     ("runtime.py", "if not self.topic_allows(fn.__name__) or not self.allowed(cls):", "if not self.allowed(cls):", "topics: disabled subject removes the tool"),
     ("runtime.py", "if not self.settings.topic_enabled(kind.family):", "if False:", "topics: disabled subject refuses its kinds"),
     ("topics.py", "    enabled.add(CORE)\n", "", "topics: core always enabled"),
@@ -77,6 +79,38 @@ MUTANTS = [
     ("tools/changes.py", "if live is None or live == SECRET_MARKER:", "if False:", "N3 revert refused when a secret is gone"),
     ("tools/changes.py", 'if record.get("user_uuid") != rt.identity().principal.user_uuid:', "if False:", "N4 reverting another user's change is HIGH RISK"),
     ("tools/changes.py", "return text if _PLAIN.fullmatch(text) else json.dumps(text, ensure_ascii=True)[:120]", "return text", "F-17 risk values escaped"),
+    # --- security-audit-skill run-1 (2026-10-31) ---
+    ("xc_client.py", '.replace(token.get_secret_value(), "[redacted]")', "", "R-1 caller token masked in detail"),
+    ("sanitize.py", "key_s = text(key, 60)  # map keys", "key_s = str(key)  # map keys", "R-2 map keys sanitised"),
+    ("sanitize.py", "    value = value[: limit * 4 + 16]\n", "", "R-4 text bounded before scan"),
+    ("sanitize.py", "or set(item) <= _REF_KEYS", "", "W-10 bare name reference"),
+    ("tools/config_read.py", "if isinstance(ns, str) and ns and not rt.settings.namespace_allowed(ns):", "if False:",
+     "R-3 referrers outside allow-list hidden"),
+    ("tools/security.py", "return value if isinstance(value, list) else []", "return value or []",
+     "R-6 malformed upstream lists"),
+    ("tools/changes.py", 'and "monitoring" not in before and operation == "replace":',
+     'and "monitoring" not in before and operation == "replace" and before:', "W-1 empty spec keeps banner"),
+    ("tools/changes.py", "normalize_prefixes([e.get(\"ipv4_prefix\") for e in entries], rt.settings.min_ipv4_prefix_len)",
+     "pass", "W-2 minimum prefix on create"),
+    ("tools/changes.py", 'if "allow_all_response_codes" in spec:', "if False:", "W-3 weak attached firewall"),
+    ("tools/changes.py", 'ops = diff({}, metadata, "metadata") + ops', "pass", "W-4 create metadata shown"),
+    ("tools/changes.py", 'status, error = "unknown", None', 'status, error = "ok", None', "W-5 apply status unknown"),
+    ("runtime.py", 'status, code, detail = "unknown", None, ""', 'status, code, detail = "ok", None, ""',
+     "W-5 tool_call status unknown"),
+    ("runtime.py", 'status, detail = "cancelled", type(exc).__name__', "pass", "W-5 cancellation logged"),
+    ("plans.py", "if existing.identity == plan.identity]", "if True]", "W-6 per-identity plan capacity"),
+    ("tools/changes.py", "    except OSError:\n        return True", "    except OSError:\n        return False",
+     "W-8 unreadable kill switch fails closed"),
+    ("tools/changes.py", "        ensure_writes_enabled()  # before take()", "        pass", "W-8 kill before take"),
+    ("tools/changes.py", '"disable_malware_protection": "malware protection disabled",', "", "W-9 LB downgrades"),
+    ("tools/changes.py", '"no_service_policies": "service policies removed",', "", "W-11 LB downgrades (existing)"),
+    ("tools/changes.py", 'if any(p.startswith("spec.trusted_clients") for p in paths):', "if False:",
+     "W-11 trusted clients change"),
+    ("plans.py", "if plan.expires_at < now]", "if False]", "W-11 plan TTL"),
+    ("identity.py", "if entry is None or entry[0] < now:", "if entry is None:", "W-11 identity cache expiry"),
+    ("catalog.py", "if pattern is None or not pattern.fullmatch(template):", "if False:", "S-2 catalogue path shapes"),
+    ("catalog.py", "if endpoint.method not in DATA_METHODS or not DATA_PATH_RE.fullmatch(endpoint.path):", "if False:",
+     "S-3 data endpoint method and path"),
 ]
 
 
@@ -88,6 +122,14 @@ def run_pytest(work: Path, args: list[str]) -> int:
 
 
 def main(repo: Path, out: Path) -> int:
+    # CI's umask: under 077 the "rollback file is 0600" mutant would be equivalent.
+    os.umask(0o022)
+    # Baseline: a suite that already fails would report every mutant as killed.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / "repo"
+        shutil.copytree(repo, work, ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv"))
+        if run_pytest(work, ["tests"]) != 0:
+            raise SystemExit("baseline: the unmutated test suite fails; fix it before mutation testing")
     results = []
     for file, old, new, guard in MUTANTS:
         with tempfile.TemporaryDirectory() as tmp:

@@ -185,7 +185,8 @@ class Runtime:
                 if isinstance(kwargs.get(key), str):
                     context["extra"][field] = kwargs[key]
             ident: Identity | None = None
-            status, code, detail = "ok", None, ""
+            # "ok" is only set once the tool returned: a cancelled call is not a success.
+            status, code, detail = "unknown", None, ""
             token = None
             try:
                 if ctx is None:
@@ -193,13 +194,18 @@ class Runtime:
                 ident = await self.resolve_identity(ctx)
                 token = _current.set(ident)
                 self.guardrails.check(identity=ident.key, session=ident.session, tool=name, args_hash=digest)
-                return await fn(*args, **kwargs)
+                result = await fn(*args, **kwargs)
+                status = "ok"
+                return result
             except SecureError as exc:
                 status, code, detail = "denied" if exc.status is None else "error", exc.code, exc.detail
                 raise
             except Exception as exc:  # pydantic errors, bugs: never leak internals
                 status, code, detail = "error", Code.INTERNAL, type(exc).__name__
                 raise SecureError(Code.INTERNAL, detail=type(exc).__name__) from exc
+            except BaseException as exc:  # asyncio.CancelledError (client cancelled), KeyboardInterrupt
+                status, detail = "cancelled", type(exc).__name__
+                raise
             finally:
                 self.audit.emit(
                     event="tool_call", request_id=context["request_id"], tool=name, tool_class=str(cls),

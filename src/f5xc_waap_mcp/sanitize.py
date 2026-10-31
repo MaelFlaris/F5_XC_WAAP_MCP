@@ -27,6 +27,7 @@ from .catalog import Kind
 
 MAX_TEXT = 200
 MAX_LIST = 100
+MAX_KEYS = 200
 MAX_DEPTH = 12
 REDACTED = "[redacted]"
 
@@ -46,10 +47,19 @@ def _hidden(ch: str) -> bool:
     return any(low <= code <= high for low, high in _VARIATION_SELECTORS)
 
 _SECRET_KEY = re.compile(
-    r"(?i)(private_key|password|passwd|secret|token|api_?key|client_secret|hmac|credential|"
+    r"(?i)(private_key|password|passwd|passphrase|secret|token|api_?key|access_key|pre_shared_key|(?:^|_)psk(?:$|_)|"
+    r"client_secret|hmac|credential|"
     r"clear_secret_info|blindfold_secret_info|vault_secret_info|wingman_secret_info|pkcs12|"
     r"certificate_url|key_url)"
 )
+# "-----BEGIN" in clear or base64-encoded ("LS0tLS1CRUdJTi"): PEM material under a neutral key.
+_PEM_MARKERS = ("-----BEGIN", "LS0tLS1CRUdJTi")
+
+
+def looks_like_secret_value(value: str) -> bool:
+    return value.startswith("string:///") or any(marker in value for marker in _PEM_MARKERS)
+
+
 # Keys of a GET response that are never returned (forms duplicate the spec,
 # status and system metadata are noisy or internal).
 _DROP_KEYS = frozenset({"create_form", "replace_form", "status", "owner_view", "object"})
@@ -65,6 +75,8 @@ def text(value: Any, limit: int = MAX_TEXT) -> str:
         return ""
     if not isinstance(value, str):
         value = str(value)
+    # Bound the work before scanning: a multi-megabyte value would block the event loop.
+    value = value[: limit * 4 + 16]
     value = "".join(" " if _hidden(ch) else ch for ch in value)
     value = " ".join(value.split())
     return value if len(value) <= limit else value[: limit - 1] + "…"
@@ -76,7 +88,10 @@ def redact(node: Any, depth: int = 0, text_limit: int = MAX_TEXT) -> Any:
         return "[truncated: depth]"
     if isinstance(node, dict):
         out: dict[str, Any] = {}
-        for key, value in node.items():
+        for index, (key, value) in enumerate(node.items()):
+            if index >= MAX_KEYS:
+                out["[truncated]"] = f"{len(node) - MAX_KEYS} more keys"
+                break
             key_s = text(key, 80)
             if _SECRET_KEY.search(key_s):
                 out[key_s] = REDACTED
@@ -89,7 +104,7 @@ def redact(node: Any, depth: int = 0, text_limit: int = MAX_TEXT) -> Any:
             items.append(f"[truncated: {len(node) - MAX_LIST} more]")
         return items
     if isinstance(node, str):
-        if "-----BEGIN" in node or node.startswith("string:///"):
+        if looks_like_secret_value(node):
             return REDACTED
         return text(node, text_limit)
     if isinstance(node, bool | int | float) or node is None:
@@ -108,6 +123,7 @@ def ref(node: Any) -> dict[str, str] | None:
 
 
 REF_DEPTH = 64
+_REF_KEYS = frozenset({"name", "namespace", "tenant", "kind", "uid"})
 
 
 def collect_refs(node: Any, path: str = "", out: list[dict[str, str]] | None = None, depth: int = 0) -> list:
@@ -122,11 +138,12 @@ def collect_refs(node: Any, path: str = "", out: list[dict[str, str]] | None = N
         if isinstance(node.get("name"), str) and ("namespace" in node or "tenant" in node) and len(node) <= 5:
             r = ref(node)
             if r is not None:
-                out.append({"field": path[:120], **r})
+                out.append({"field": text(path, 120), **r})
             return out
         for key, value in node.items():
             if not _SECRET_KEY.search(str(key)):
-                collect_refs(value, f"{path}.{key}" if path else str(key), out, depth + 1)
+                key_s = text(key, 60)  # map keys are tenant-written text, like descriptions
+                collect_refs(value, f"{path}.{key_s}" if path else key_s, out, depth + 1)
     elif isinstance(node, list):
         for i, value in enumerate(node):
             collect_refs(value, f"{path}[{i}]", out, depth + 1)
@@ -138,7 +155,8 @@ def find_references_to(node: Any, name: str, namespace: str) -> tuple[list[str],
 
     Used to decide whether creating that object activates it immediately, so it
     over-approximates on purpose: any dict whose ``name`` equals the target and
-    that carries a namespace, tenant or kind key counts, whatever its other keys.
+    that carries a namespace, tenant or kind key counts, whatever its other keys, and
+    so does a bare reference made only of reference keys (``{"name": ...}``).
     Returns (fields, complete); complete is False when the spec is deeper than
     the scan limit."""
     found: list[str] = []
@@ -150,11 +168,12 @@ def find_references_to(node: Any, name: str, namespace: str) -> tuple[list[str],
             complete = False
             return
         if isinstance(item, dict):
-            if (item.get("name") == name and any(k in item for k in ("namespace", "tenant", "kind"))
-                    and item.get("namespace") in (None, "", namespace)):
-                found.append(path[:200] or "spec")
+            if (item.get("name") == name and item.get("namespace") in (None, "", namespace)
+                    and (any(k in item for k in ("namespace", "tenant", "kind")) or set(item) <= _REF_KEYS)):
+                found.append(text(path, 200) or "spec")
             for key, value in item.items():
-                walk(value, f"{path}.{key}" if path else str(key), depth + 1)
+                key_s = text(key, 60)
+                walk(value, f"{path}.{key_s}" if path else key_s, depth + 1)
         elif isinstance(item, list):
             for i, value in enumerate(item):
                 walk(value, f"{path}[{i}]", depth + 1)

@@ -178,7 +178,9 @@ async def test_create_object(write_harness, xc):
         Human("new-set"))
     assert not applied.isError
     assert plan["risk"] == "standard"
-    assert plan["diff_text"] == '+ spec.ipv4_prefixes[0].ipv4_prefix = "203.0.113.0/24"'
+    # Labels are part of the body, so they are part of the reviewed diff (audit W-4).
+    assert plan["diff_text"] == ('+ metadata.labels.owner = "secops"\n'
+                                 '+ spec.ipv4_prefixes[0].ipv4_prefix = "203.0.113.0/24"')
     assert xc.bodies(path)[0]["metadata"] == {"labels": {"owner": "secops"}, "name": "new-set", "namespace": "prod"}
 
 

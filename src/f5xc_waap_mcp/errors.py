@@ -12,7 +12,11 @@ import re
 from enum import StrEnum
 
 _SCRUB = (
-    re.compile(r"(?i)(apitoken|authorization|bearer|token|secret|password)[\"']?\s*[:=]\s*\S+"),
+    # Auth schemes first: "Authorization: APIToken <tok>" must lose the token, not only "APIToken".
+    re.compile(r"(?i)\b(apitoken|bearer|basic)\s+[A-Za-z0-9._~+/=\-]{6,}"),
+    # key = "value with spaces" / key: 'value' / "key": "value" (JSON) / key=value.
+    re.compile(r"(?i)(apitoken|authorization|bearer|token|secret|password|passphrase|api_?key)[\"']?\s*[:=]\s*"
+               r"(\"[^\"]*\"|'[^']*'|\S+)"),
     re.compile(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{4,}"),
     re.compile(r"https?://\S+"),
 )

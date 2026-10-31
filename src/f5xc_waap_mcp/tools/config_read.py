@@ -94,13 +94,18 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             data = sanitize.full_spec(obj)
         else:
             referring = obj.get("referring_objects") if isinstance(obj.get("referring_objects"), list) else []
-            data = {
-                **sanitize.metadata(obj),
-                "referring_objects": [
-                    {"kind": sanitize.text(r.get("kind"), 63), **(sanitize.ref(r) or {})}
-                    for r in referring[:100] if isinstance(r, dict)
-                ],
-            }
+            # Same allow-list as list_namespaces: names from other namespaces are counted, not shown.
+            visible, hidden = [], 0
+            for r in referring[:100]:
+                if not isinstance(r, dict):
+                    continue
+                ns = r.get("namespace")
+                if isinstance(ns, str) and ns and not rt.settings.namespace_allowed(ns):
+                    hidden += 1
+                    continue
+                visible.append({"kind": sanitize.text(r.get("kind"), 63), **(sanitize.ref(r) or {})})
+            data = {**sanitize.metadata(obj), "referring_objects": visible,
+                    "referring_objects_outside_allow_list": hidden}
         return sanitize.envelope("get_object", data, kind=kind, namespace=namespace, view=view, doc=k.doc)
 
     @rt.tool(mcp, ToolClass.READ, title="Active namespace service policies")

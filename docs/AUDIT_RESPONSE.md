@@ -50,6 +50,37 @@ tenant ou un vrai client MCP).
 | N4 | Info | Décidé | Revert du changement d'un autre autorisé (besoin d'exploitation ; le RBAC XC reste la frontière), mais auteur et date dans le résumé, et HIGH RISK : le hash est à retaper | `test_N4_*` ; mutant tué |
 | N5 | Faible | Corrigé | Public Suffix List embarquée (ICANN + privée, version 2026-10-28, MPL-2.0), `scripts/update_psl.py` pour la rafraîchir | `test_N5_*` (`gouv.fr`, `github.io`, règles `*.ck` / `!www.ck`) ; mutant tué |
 
+### Audit security-audit-skill, run-1 (2026-10-31)
+
+Skill `cloudflare/security-audit-skill`, profil `quick` (couverture partielle), revue sur
+`b376c58`. Aucun constat critique, élevé ou moyen. Chaque correctif ci-dessous a un test dans
+`tests/test_audit_run1.py`, qui échouait avant correctif (53/53 rouges sur `cf80903`).
+
+| ID | Verdict de l'audit | Correctif | Preuve |
+|---|---|---|---|
+| R-1 | À valider | Masquage du schéma `APIToken`/`Bearer`/`Basic <jeton>` et des valeurs entre guillemets ; le jeton de l'appelant est remplacé littéralement dans le corps d'erreur avant `detail` | `test_R1_*`, `test_R8_*` ; mutant |
+| R-2 | À valider | Clés de map de la spec passées par `text()` dans `references[].field` et dans la recherche de référents | `test_R2_*` ; mutant |
+| R-3 | Rejeté (durci) | Vue `referrers` : les objets d'un namespace hors liste sont comptés (`referring_objects_outside_allow_list`), pas nommés | `test_R3_*` ; mutant |
+| R-4 | Rejeté (durci) | `text()` tronque avant de parcourir ; `redact()` plafonne à 200 clés par objet | `test_R4_*` ; mutant |
+| R-6 | Confirmé, info | `_as_list()` sur les listes amont de `list_certificate_expiry` et `get_lb_performance` | `test_R6_*` ; mutant |
+| R-7 | Durcissement | Clés secrètes en plus (`passphrase`, `access_key`, `pre_shared_key`, `psk`) et PEM encodé en base64 sous une clé quelconque, en lecture comme dans les fichiers de rollback | `test_R7_*` |
+| W-1 | À valider | `assess_risks` distingue create/replace par `operation`, plus par un `before` vide | `test_W1_*` ; mutant |
+| W-2 | Confirmé, info | La création d'un `ip_prefix_set` applique le même préfixe minimum que la mise à jour (`normalize_prefixes` partagé) | `test_W2_*` ; mutant |
+| W-3a | Confirmé, info | Attacher un firewall : HIGH RISK si `monitoring`, `allow_all_response_codes`, ou réglages de détection / bot personnalisés (non visibles dans le diff ; non interprétés pour ne rien deviner) | `test_W3_*` ; mutant |
+| W-4 | Confirmé, faible | Description et labels d'une création font partie du diff (`+ metadata.…`) | `test_W4_*` ; mutant |
+| W-5 | Confirmé, faible | Statut d'audit `unknown` tant que XC n'a pas répondu ; `cancelled` sur annulation dans `tool_call` ; code d'erreur renseigné | `test_W5_*` ; 3 mutants |
+| W-6 | Rejeté (durci) | Capacité du magasin de plans par identité (32) et à la création seulement : un utilisateur ne peut plus évincer le plan d'un autre | `test_W6_*` ; mutant |
+| W-7 | Rejeté (durci) | `compare_digest` sur des octets (identité non ASCII) | `test_W7_*` |
+| W-8 | Rejeté (durci) | Interrupteur lu par `os.stat` : illisible = actif ; contrôlé aussi avant de consommer le plan | `test_W8_*` ; 2 mutants |
+| W-9 | Confirmé, faible | `LB_DOWNGRADES` couvre les 5 options manquantes ; un test compare la liste aux options `disable_*`/`no_*` du catalogue | `test_W9_*` ; mutant |
+| W-10 | À valider | Une référence réduite à `{"name": …}` (clés de référence seules) compte comme référent | `test_W10_*` ; mutant |
+| W-11 | Rejeté (durci) | `mutate_guards.py` : suite non mutée lancée d'abord, umask 022, 25 mutants de plus (TTL, cache d'identité, trusted clients, downgrades existants, correctifs ci-dessus) | voir « Preuves rejouables » |
+| S-1 | Confirmé, faible | `CODEOWNERS` : tout le paquet, tests, fuzz, scripts, packaging, modèle de menaces | — (protection de branche : action GitHub du propriétaire) |
+| S-2, S-3 | Rejeté (durci) | Forme des chemins CRUD et des endpoints de données vérifiée au chargement du catalogue (méthodes `GET`/`POST` seulement) et dans `generate_catalog.py` | `test_S2_*`, `test_S3_*` ; 2 mutants |
+| S-4 | Rejeté (durci) | `update_psl.py` : règles canari, baisse du nombre de règles limitée à 2 %, remplacement atomique | — |
+| S-5 | Rejeté (durci) | `lock.sh` : `CUTOFF` validé (format, jamais dans la fenêtre de 14 jours) | — |
+| R-5 | Rejeté | Non corrigé : amplification avec le jeton et le quota de l'appelant lui-même | — |
+
 Défaut de l'outillage d'audit : la règle Semgrep `model-arg-in-fstring-url` ne déclenchait
 pas sur `f"/api/config/namespaces/{name}"`. Son « 0 finding » ne prouvait rien. Motif
 corrigé ; chaque règle a maintenant des cas positifs et négatifs testés par

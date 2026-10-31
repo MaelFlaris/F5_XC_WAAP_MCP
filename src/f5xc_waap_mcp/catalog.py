@@ -40,6 +40,29 @@ class DataEndpoint:
     path: str
 
 
+# Shapes a catalogue path may take (also enforced by scripts/generate_catalog.py). A
+# catalogue edit that points an operation elsewhere fails at import, not at call time.
+CRUD_PATH_RE = {
+    "list": re.compile(r"/api/config/(dns/)?namespaces/\{namespace\}/[a-z_]+"),
+    "get": re.compile(r"/api/config/(dns/)?namespaces/\{namespace\}/[a-z_]+/\{name\}"),
+    "create": re.compile(r"/api/config/(dns/)?namespaces/\{metadata\.namespace\}/[a-z_]+"),
+    "replace": re.compile(r"/api/config/(dns/)?namespaces/\{metadata\.namespace\}/[a-z_]+/\{metadata\.name\}"),
+}
+DATA_METHODS = frozenset({"GET", "POST"})
+DATA_PATH_RE = re.compile(r"/api/(config|data|web|waf)(/[a-z0-9_\-]+|/\{(namespace|name)\})+")
+
+
+def check_catalog(kinds: dict[str, Kind], data: dict[str, DataEndpoint]) -> None:
+    for k in kinds.values():
+        for operation, template in k.paths.items():
+            pattern = CRUD_PATH_RE.get(operation)
+            if pattern is None or not pattern.fullmatch(template):
+                raise RuntimeError(f"catalog: unexpected {operation} path for {k.name}")
+    for endpoint in data.values():
+        if endpoint.method not in DATA_METHODS or not DATA_PATH_RE.fullmatch(endpoint.path):
+            raise RuntimeError(f"catalog: unexpected data endpoint {endpoint.id}")
+
+
 def _load() -> tuple[dict[str, Kind], dict[str, DataEndpoint]]:
     raw = json.loads(resources.files(__package__).joinpath("data/catalog.json").read_text(encoding="utf-8"))
     kinds = {
@@ -59,6 +82,7 @@ def _load() -> tuple[dict[str, Kind], dict[str, DataEndpoint]]:
         endpoint_id: DataEndpoint(endpoint_id, item["doc"], item["method"], item["path"])
         for endpoint_id, item in raw["data"].items()
     }
+    check_catalog(kinds, data)
     return kinds, data
 
 
