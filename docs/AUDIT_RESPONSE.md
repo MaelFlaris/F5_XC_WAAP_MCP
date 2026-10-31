@@ -74,7 +74,7 @@ Skill `cloudflare/security-audit-skill`, profil `quick` (couverture partielle), 
 | W-8 | Rejeté (durci) | Interrupteur lu par `os.stat` : illisible = actif ; contrôlé aussi avant de consommer le plan | `test_W8_*` ; 2 mutants |
 | W-9 | Confirmé, faible | `LB_DOWNGRADES` couvre les 5 options manquantes ; un test compare la liste aux options `disable_*`/`no_*` du catalogue | `test_W9_*` ; mutant |
 | W-10 | À valider | Une référence réduite à `{"name": …}` (clés de référence seules) compte comme référent | `test_W10_*` ; mutant |
-| W-11 | Rejeté (durci) | `mutate_guards.py` : suite non mutée lancée d'abord, umask 022, 25 mutants de plus (TTL, cache d'identité, trusted clients, downgrades existants, correctifs ci-dessus) | voir « Preuves rejouables » |
+| W-11 | Rejeté (durci) | `mutate_guards.py` : suite non mutée lancée d'abord, umask 022, 26 mutants de plus (TTL, cache d'identité, trusted clients, downgrades existants, correctifs ci-dessus) | run : 72/74 tués ; les 2 survivants (R-2 : deux nettoyages redondants ; W-5 : valeur initiale jamais observée) ont été corrigés ou remplacés par le vrai garde-fou, puis tués |
 | S-1 | Confirmé, faible | `CODEOWNERS` : tout le paquet, tests, fuzz, scripts, packaging, modèle de menaces | — (protection de branche : action GitHub du propriétaire) |
 | S-2, S-3 | Rejeté (durci) | Forme des chemins CRUD et des endpoints de données vérifiée au chargement du catalogue (méthodes `GET`/`POST` seulement) et dans `generate_catalog.py` | `test_S2_*`, `test_S3_*` ; 2 mutants |
 | S-4 | Rejeté (durci) | `update_psl.py` : règles canari, baisse du nombre de règles limitée à 2 %, remplacement atomique | — |
@@ -118,7 +118,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.lock -r requirements-build.lock
 pip install --no-deps --no-build-isolation .
 pytest                                                    # 231 tests, dont propriétés Hypothesis
-python -I scripts/mutate_guards.py . mutation.json        # 811c3ad : 48/48 garde-fous tués
+python -I scripts/mutate_guards.py . mutation.json        # 74 garde-fous (run-1 : 2 survivants, corrigés ensuite)
 pip install --require-hashes -r requirements-fuzz.lock
 python -I fuzz/fuzz_parsers.py -max_total_time=1800       # c32b709 : 166,7 M exécutions, 0 crash
 python -m venv /tmp/sast && /tmp/sast/bin/pip install --require-hashes -r requirements-sast.lock

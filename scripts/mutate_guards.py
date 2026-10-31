@@ -95,8 +95,10 @@ MUTANTS = [
     ("tools/changes.py", 'if "allow_all_response_codes" in spec:', "if False:", "W-3 weak attached firewall"),
     ("tools/changes.py", 'ops = diff({}, metadata, "metadata") + ops', "pass", "W-4 create metadata shown"),
     ("tools/changes.py", 'status, error = "unknown", None', 'status, error = "ok", None', "W-5 apply status unknown"),
-    ("runtime.py", 'status, code, detail = "unknown", None, ""', 'status, code, detail = "ok", None, ""',
-     "W-5 tool_call status unknown"),
+    # The initial "unknown" is never observed (every exit path sets the status), so changing it is an
+    # equivalent mutant; the guard is that "ok" is only set once the tool has returned.
+    ("runtime.py", '                status = "ok"\n                return result', "                return result",
+     "W-5 tool_call ok only after the tool returned"),
     ("runtime.py", 'status, detail = "cancelled", type(exc).__name__', "pass", "W-5 cancellation logged"),
     ("plans.py", "if existing.identity == plan.identity]", "if True]", "W-6 per-identity plan capacity"),
     ("tools/changes.py", "    except OSError:\n        return True", "    except OSError:\n        return False",
