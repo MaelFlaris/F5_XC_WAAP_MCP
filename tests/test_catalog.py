@@ -45,3 +45,18 @@ def test_waap_oneofs_present():
     lb = catalog.kind("http_loadbalancer")
     assert lb.oneofs["waf_choice"] == ["app_firewall", "disable_waf"]
     assert catalog.kind("app_firewall").oneofs["enforcement_mode_choice"] == ["blocking", "monitoring"]
+
+
+def test_writable_flag_matches_what_the_write_tools_modify():
+    """The catalogue's writable flag must equal the kinds the plan tools touch (no dormant
+    write permission on kinds no tool needs)."""
+    import inspect
+    import re
+
+    from f5xc_waap_mcp.tools import changes
+
+    source = inspect.getsource(changes)
+    targeted = set(re.findall(r'writable\("([a-z_]+)"', source))
+    used = targeted | set(changes.CREATABLE_KINDS)
+    assert {name for name, k in catalog.KINDS.items() if k.writable} == used
+    assert targeted == {"http_loadbalancer", "app_firewall", "ip_prefix_set"}

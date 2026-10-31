@@ -135,3 +135,142 @@ async def test_audit_namespace_reports_per_lb_errors(harness, xc):
 async def test_unexpected_response_shapes_are_errors(harness, xc, tool, args, route):
     xc.add(*route, {"items": "not-a-list"} if tool == "list_objects" else ["not", "an", "object"])
     assert "response_invalid" in error_text(await harness.call(tool, args))
+
+
+# --- pages added after review: WAF rule hits, alerts, service policy sets ---------------
+async def test_waf_rule_hits_totals_sorted_and_sanitised(harness, xc):
+    path = NS + "/wafs/metrics/server/rule_hits"
+    xc.add("POST", path, {"data": [
+        {"id": {"rule_id": "200001234", "virtual_host": "shop"}, "metric": [{"value": "3"}, {"value": "4"}]},
+        {"id": {"rule_id": "200009999" + TAGS, "virtual_host": "api"}, "metric": [{"value": "41"}]},
+        {"id": {"rule_id": "x"}, "metric": [{"value": "NaN"}, {"value": "abc"}, {}]},
+        "junk",
+    ]})
+    data = result_json(await harness.call("get_waf_rule_hits", {
+        "namespace": "prod", "start": "2h", "filters": [{"label": "VIRTUAL_HOST", "op": "NEQ", "value": "internal"}]}))
+    rows = data["data"]
+    assert [r["hits"] for r in rows] == [41.0, 7.0, 0.0]
+    assert rows[0]["labels"]["rule_id"] == "200009999"
+    body = xc.bodies(path)[0]
+    assert body["group_by"] == ["RULE_ID", "VIRTUAL_HOST"] and body["step"] == body["range"] == "120m"
+    assert body["label_filter"] == [{"label": "VIRTUAL_HOST", "op": "NEQ", "value": "internal"}]
+
+
+@pytest.mark.parametrize("args", [
+    {"filters": [{"label": "VIRTUAL_HOST", "value": "shop\n"}]},
+    {"filters": [{"label": "PASSWORD", "value": "x"}]},
+    {"group_by": ["RULE_ID", "SECRET"]},
+    {"group_by": []},
+])
+async def test_waf_rule_hits_rejects_bad_arguments(harness, xc, args):
+    assert (await harness.call("get_waf_rule_hits", {"namespace": "prod", **args})).isError
+    assert xc.api_requests == []
+
+
+async def test_list_alerts_parses_string_payload_and_sanitises(harness, xc):
+    alerts = [{"labels": {"alertname": "WafAttackSpike", "severity": "critical"},
+               "annotations": {"summary": "Spike" + TAGS, "description": "line1\nline2\x1b[31m"},
+               "status": {"state": "active"}, "startsAt": "2026-10-31T00:00:00Z"}]
+    xc.add("GET", NS + "/alerts", {"data": json.dumps(alerts)})
+    data = result_json(await harness.call("list_alerts", {"namespace": "prod", "alertname": "WafAttackSpike",
+                                                          "severity": "critical"}))
+    alert = data["data"][0]
+    assert alert["summary"] == "Spike" and "\n" not in alert["description"] and "\x1b" not in alert["description"]
+    assert alert["state"] == "active" and alert["labels"]["severity"] == "critical"
+    params = xc.api_requests[-1].url.params
+    assert params["filter"] == '{alertname="WafAttackSpike", severity="critical"}' and "inactive" not in params
+
+
+async def test_alert_filters_cannot_inject(harness, xc):
+    for value in ['x", severity="info', "a\nb", "x}"]:
+        assert (await harness.call("list_alerts", {"namespace": "prod", "alertname": value})).isError
+    assert xc.api_requests == []
+
+
+async def test_alerts_history(harness, xc):
+    xc.add("GET", NS + "/alerts/history", {"alerts": [json.dumps({"labels": {"alertname": "A"}}), "not json"],
+                                           "total_hits": "2"})
+    data = result_json(await harness.call("query_alerts_history", {"namespace": "prod", "start": "6h",
+                                                                   "severity": "major"}))
+    assert data["data"][0]["labels"] == {"alertname": "A"} and data["data"][1] == {"unparsed": True}
+    params = xc.api_requests[-1].url.params
+    assert params["filter"] == '{severity="major"}' and params["start_time"] < params["end_time"]
+
+
+async def test_service_policy_sets_are_readable(harness, xc):
+    xc.add("GET", "/api/config/namespaces/prod/service_policy_sets", {"items": [{"name": "default"}]})
+    data = result_json(await harness.call("list_objects", {"kind": "service_policy_set", "namespace": "prod"}))
+    assert data["data"][0]["name"] == "default"
+
+
+# --- console pages review: certificate expiry, new read-only kinds, shared namespace ----------
+def _iso(days: int) -> str:
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) + timedelta(days=days, hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _cert_routes(xc, certs: dict, lbs: dict | None = None, chains: dict | None = None):
+    base = "/api/config/namespaces/prod"
+    for kind, objects in (("certificates", certs), ("http_loadbalancers", lbs or {}),
+                          ("certificate_chains", chains or {})):
+        xc.add("GET", f"{base}/{kind}", {"items": [{"name": n} for n in objects]})
+        for name, spec in objects.items():
+            xc.add("GET", f"{base}/{kind}/{name}", spec if isinstance(spec, tuple) else {"spec": spec})
+
+
+async def test_certificate_expiry_sorted_with_users_and_no_private_key(harness, xc):
+    secret = "string:///LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t"
+    _cert_routes(xc, certs={
+        "shop-cert": {"private_key": {"clear_secret_info": {"url": secret}},
+                      "infos": [{"common_name": "shop.example.com", "subject_alternative_names": ["shop.example.com",
+                                 "www.shop.example.com" + TAGS], "issuer": "R11", "expiry": _iso(12)}],
+                      "http_loadbalancers": [{"name": "shop", "namespace": "prod"}]},
+        "old-cert": {"infos": [{"common_name": "old.example.com", "expiry": _iso(-3)}]},
+        "weird": {"infos": [{"common_name": "w", "expiry": "not a date"}]},
+    }, lbs={"api": {"auto_cert_info": {"auto_cert_expiry": _iso(60), "auto_cert_subject": "CN=api.example.com",
+                                       "auto_cert_issuer": "Let's Encrypt", "auto_cert_state": "CertificateValid"}},
+            "plain": {"domains": ["x"]}})
+    result = await harness.call("list_certificate_expiry", {"namespace": "prod"})
+    assert "LS0tLS1" not in result.content[0].text and "string:///" not in result.content[0].text
+    data = result_json(result)
+    rows = data["data"]
+    assert [r["name"] for r in rows] == ["old-cert", "shop-cert", "api", "weird"]
+    assert [r["days_left"] for r in rows[:3]] == [-3, 12, 60] and rows[3]["days_left"] is None
+    assert rows[1]["used_by"] == ["http_loadbalancer/shop"]
+    assert rows[1]["subject_alternative_names"] == ["shop.example.com", "www.shop.example.com"]
+    assert rows[2]["source"] == "lb_auto_cert" and rows[2]["state"] == "CertificateValid"
+    assert data["expired"] == 1 and data["unknown_expiry"] == 1 and data["incomplete"] is False
+
+
+async def test_certificate_expiry_filter_chains_and_incomplete(harness, xc):
+    _cert_routes(xc, certs={"soon": {"infos": [{"common_name": "a", "expiry": _iso(5)}]},
+                            "later": {"infos": [{"common_name": "b", "expiry": _iso(200)}]},
+                            "broken": ({}, )},
+                 chains={"intermediate": {"infos": [{"common_name": "R11", "expiry": _iso(20)}]}})
+    xc.add("GET", "/api/config/namespaces/prod/certificates/broken", (403, {}))
+    data = result_json(await harness.call("list_certificate_expiry", {
+        "namespace": "prod", "within_days": 30, "include_chains": True, "include_auto_certs": False}))
+    assert [(r["source"], r["name"]) for r in data["data"]] == [("certificate", "soon"), ("chain", "intermediate")]
+    assert data["incomplete"] is True
+
+
+@pytest.mark.parametrize(("kind", "collection"), [
+    ("certificate_chain", "certificate_chains"), ("cdn_cache_rule", "cdn_cache_rules"),
+    ("bigip_virtual_server", "bigip_virtual_servers"), ("public_ip", "public_ips"),
+])
+async def test_console_pages_added_read_only(harness, xc, kind, collection):
+    xc.add("GET", f"/api/config/namespaces/prod/{collection}", {"items": [{"name": "o1"}]})
+    data = result_json(await harness.call("list_objects", {"kind": kind, "namespace": "prod"}))
+    assert data["data"][0]["name"] == "o1"
+    from f5xc_waap_mcp import catalog
+    assert not catalog.kind(kind).writable
+
+
+async def test_posture_explains_how_to_read_a_shared_waf(xc):
+    from tests.conftest import Harness, make_settings
+    harness = Harness(make_settings(allowed_namespaces=("prod",)), xc)
+    xc.add("GET", "/api/config/namespaces/prod/http_loadbalancers/shop",
+           {"spec": {"app_firewall": {"name": "corp-waf", "namespace": "shared"}}})
+    data = result_json(await harness.call("get_lb_security_posture", {"namespace": "prod", "name": "shop"}))["data"]
+    assert "'shared' not allow-listed" in data["waf_mode"] and "F5XC_ALLOWED_NAMESPACES" in data["waf_mode"]
+    assert all("/shared/" not in r.url.path for r in xc.requests)

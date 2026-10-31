@@ -23,8 +23,12 @@ Légende :
 | UDP Load Balancer | `views.udp_loadbalancer` | — |
 | Origin pools (serveurs d'origine, TLS vers l'origine, algorithme) | `views.origin_pool` | L |
 | Health checks | `healthcheck` | L, É (création) |
-| Certificats TLS, chaînes, listes de CA | `certificate`, `trusted_ca_list` | L 🔒 / L |
-| Purge de cache CDN | `cdn_loadbalancer/.../cache-purge` | — (action destructive) |
+| Certificats TLS, chaînes intermédiaires, listes de CA | `certificate`, `certificate_chain`, `trusted_ca_list` | L 🔒 / L / L |
+| Expiration des certificats (CN, SAN, émetteur, jours restants, LB utilisateurs, certificats automatiques des LB) | `certificate.infos`, `auto_cert_info` du LB | L (`list_certificate_expiry`), sans jamais lire la clé privée |
+| Règles de cache CDN | `cdn_cache_rule` | L |
+| BIG-IP Virtual Servers publiés via XC | `views.bigip_virtual_server` | L |
+| Adresses IP publiques (VIP exposées) | `public_ip` | L |
+| Purge de cache CDN | `cdn_loadbalancer/.../cache-purge` | — (action destructive, volontairement non exposée) |
 | Virtual hosts (objets bas niveau) | `virtual_host` | — |
 
 ## 2. Web Application Firewall
@@ -36,7 +40,7 @@ Légende :
 | Exclusions WAF (faux positifs) inline ou en policy | `waf_exclusion` du LB, `waf_exclusion_policy` | L, `suggest_waf_exclusion_rule` ; É (outil) `plan_add_waf_exclusion_rule` (règles inline) ; É (création) pour une policy |
 | Version des signatures d'attaque | `/api/waf/latest-signatures-version` | L |
 | Signatures staged / released par virtual host, threat campaigns | `waf_signatures_changelog` | — |
-| Métriques de hits WAF (règles, events) | `wafs/metrics/...` | — |
+| Hits par règle WAF (tri des faux positifs) | `wafs/metrics/server/rule_hits` | L (`get_waf_rule_hits`) |
 
 ## 3. Policies (contrôle d'accès, débit)
 
@@ -44,6 +48,7 @@ Légende :
 |---|---|---|
 | Service policies (allow/deny par IP, pays, ASN, en-têtes, chemins...) | `service_policy` | L, É (création) |
 | Service policies actives au niveau namespace | `active_service_policies` | L |
+| Service policy sets | `service_policy_set` | L |
 | Règles legacy de service policy | `service_policy_rule` | L |
 | Rate limiter policies et rate limiters | `views.rate_limiter_policy`, `rate_limiter` | L, É (création) |
 | Listes d'IP (blocklist / allowlist) | `ip_prefix_set` | L, É (outil) `plan_update_ip_prefix_set`, É (création) |
@@ -56,7 +61,7 @@ Légende :
 |---|---|---|
 | Bot defense standard du LB (activée / désactivée) | `bot_defense_choice` du LB | L (posture) |
 | Infrastructure Bot Defense avancée | `views.bot_defense_app_infrastructure` | L |
-| Bot Defense avancé (Shape) : protected apps, allowlists, endpoints | `shape_bot_defense_*` | — |
+| Bot Defense avancé (Shape) : protected apps, allowlists, endpoints, reporting (~120 opérations) | `shape_bot_defense_*` | — (seulement si l'offre avancée est utilisée) |
 | Détection d'utilisateurs malveillants, identification, mitigation | `malicious_user_mitigation`, `user_identification`, `app_setting`, `app_type` | L |
 | Logs d'utilisateurs suspects | `app_security/suspicious_user_logs` | L (`query_suspicious_users`) |
 | Client-side defense (Shape) | `shape_client_side_defense_*` | — (posture LB seulement) |
@@ -93,8 +98,8 @@ Légende :
 | Access logs et agrégations | `access_logs`, `access_logs/aggregation` | L |
 | Audit logs (qui a modifié quoi) | `audit_logs` | L (`query_audit_logs`) |
 | Alert policies, alert receivers, global log receivers | `alert_policy`, `alert_receiver`, `global_log_receiver` | L / L 🔒 / L 🔒 |
-| Alertes actives, historique | `alerts` | — |
-| Suggestions XC (block client, trust client, rate limit, DDoS, OAS) | `.../suggestion` | WAF exclusion seulement ; le reste en feuille de route |
+| Alertes actives, historique | `alerts` | L (`list_alerts`, `query_alerts_history`) |
+| Suggestions XC (block client, trust client, rate limit, DDoS, OAS, `api_sec/rule_suggestion`) | `.../suggestion` | WAF exclusion seulement ; les autres en feuille de route (aucun outil d'écriture ne les exploiterait) |
 
 ## 8. DNS
 

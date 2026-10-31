@@ -40,6 +40,9 @@ docs.cloud.f5.com).
 | `query_audit_logs` | Qui a modifié quoi dans le namespace |
 | `suggest_waf_exclusion_rule` | Règle d'exclusion proposée par XC pour un faux positif |
 | `get_lb_dos_mitigation_rules`, `get_lb_dns_info`, `get_waf_signatures_version` | DDoS auto-mitigation, infos DNS du LB, version des signatures |
+| `get_waf_rule_hits` | Nombre de déclenchements par règle WAF (et par LB, sévérité, tag…), trié : les candidats faux positifs |
+| `list_alerts`, `query_alerts_history` | Alertes actives et historique, pour contextualiser une analyse |
+| `list_certificate_expiry` | Certificats TLS triés par expiration : CN, SAN, émetteur, jours restants, LB utilisateurs ; inclut les certificats automatiques des LB ; la clé privée n'est jamais lue |
 
 **Écriture (seulement avec `F5XC_MCP_MODE=write` et `F5XC_MCP_ENABLE_WRITES=true`)**
 
@@ -143,6 +146,13 @@ La commande appelle `whoami` et indique quels champs sont remplis (`name`, `emai
 indique si le rôle peut lister les LB HTTP et lire les service policies actives. Elle
 n'écrit rien et n'affiche jamais le token. Code de sortie 1 si l'identité ne peut pas
 être résolue : dans ce cas, le serveur refusera tous les appels.
+
+### Objets partagés (namespace `shared`)
+
+Si les App Firewalls, IP prefix sets ou service policies sont dans `shared`, ajoutez
+`shared` à `F5XC_ALLOWED_NAMESPACES` pour pouvoir les **lire**. Sinon, la posture d'un LB
+affiche « unknown (namespace 'shared' not allow-listed) » pour son WAF. L'écriture dans
+`shared` (comme dans `system`) reste refusée en dur, quelle que soit la configuration.
 
 ### Token, identité et droits
 

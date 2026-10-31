@@ -41,12 +41,17 @@ KINDS: dict[str, tuple[str, str, bool, bool]] = {
     "healthcheck": ("healthcheck", "load_balancing", True, False),
     "certificate": ("certificate", "load_balancing", False, True),
     "trusted_ca_list": ("trusted-ca-list", "load_balancing", False, False),
+    "certificate_chain": ("certificate-chain", "load_balancing", False, False),
+    "cdn_cache_rule": ("cdn-cache-rule", "load_balancing", False, False),
+    "bigip_virtual_server": ("views-bigip-virtual-server", "load_balancing", False, False),
+    "public_ip": ("public-ip", "load_balancing", False, False),
     # Web application firewall
     "app_firewall": ("app-firewall", "waf", True, False),
     "waf_exclusion_policy": ("waf-exclusion-policy", "waf", True, False),
     # Policies
     "service_policy": ("service-policy", "policies", True, False),
     "service_policy_rule": ("service-policy-rule", "policies", False, False),
+    "service_policy_set": ("service-policy-set", "policies", False, False),
     "rate_limiter_policy": ("views-rate-limiter-policy", "policies", True, False),
     "rate_limiter": ("rate-limiter", "policies", True, False),
     "ip_prefix_set": ("ip-prefix-set", "policies", True, False),
@@ -84,6 +89,15 @@ KINDS: dict[str, tuple[str, str, bool, bool]] = {
 }
 
 # Data / custom endpoints called by the server: id -> (doc slug, method, path)
+# Kinds a write tool actually modifies (targeted replace or creation, see
+# tools/changes.py). The writable flag is restricted to them, so the server's
+# writable() check refuses every other kind even if a future tool targeted it.
+# tests/test_catalog.py keeps this set equal to what the tools use.
+WRITTEN_BY_TOOLS = frozenset({
+    "http_loadbalancer", "app_firewall", "ip_prefix_set", "healthcheck", "rate_limiter", "rate_limiter_policy",
+    "service_policy", "waf_exclusion_policy",
+})
+
 DATA_ENDPOINTS: dict[str, tuple[str, str, str]] = {
     "identity.whoami": ("user", "get", "/api/web/custom/namespaces/{namespace}/whoami"),
     "namespace.list": ("namespace", "get", "/api/web/namespaces"),
@@ -107,6 +121,9 @@ DATA_ENDPOINTS: dict[str, tuple[str, str, str]] = {
     "http_loadbalancer.dns_info": (
         "views-http-loadbalancer", "get", "/api/config/namespaces/{namespace}/http_loadbalancers/{name}/get-dns-info"),
     "waf.latest_signatures_version": ("waf-signatures-changelog", "get", "/api/waf/latest-signatures-version"),
+    "waf.rule_hits": ("waf", "post", "/api/data/namespaces/{namespace}/wafs/metrics/server/rule_hits"),
+    "alerts.list": ("alert", "get", "/api/data/namespaces/{namespace}/alerts"),
+    "alerts.history": ("alert", "get", "/api/data/namespaces/{namespace}/alerts/history"),
 }
 
 NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -197,7 +214,7 @@ def main() -> int:
         kinds[kind] = {
             "doc": f"{DOCS}/{slug}",
             "family": family,
-            "writable": writable and "create" in paths and "replace" in paths,
+            "writable": writable and kind in WRITTEN_BY_TOOLS and "create" in paths and "replace" in paths,
             "sensitive": sensitive,
             "paths": {op: paths[op] for op in ("list", "get", "create", "replace") if op in paths},
             "oneofs": oneofs,

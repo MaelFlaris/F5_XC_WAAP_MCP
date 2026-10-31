@@ -3,10 +3,12 @@ incidents, suspicious users, access and audit logs, WAF exclusion suggestions,
 DoS auto-mitigation rules."""
 
 import asyncio
+import json
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from .. import catalog, sanitize
 from ..errors import Code, SecureError
@@ -15,10 +17,12 @@ from .common import (
     AccessLogMatcher,
     AuditLogMatcher,
     EventMatcher,
+    Matcher,
     Namespace,
     ObjectName,
     TimeSpec,
     build_query,
+    parse_time,
     time_window,
 )
 
@@ -51,6 +55,23 @@ INCIDENT_FIELDS = (*sanitize.EVENT_FIELDS, "incident_id", "id", "start_time", "e
 
 Limit = Annotated[int, Field(ge=1, le=500, description="Maximum number of records (capped by the server).")]
 TopK = Annotated[int, Field(ge=1, le=50, description="Number of top values returned.")]
+# wafMetricLabel enum of the WAF metrics API (docs-v2/api/waf).
+WafMetricLabel = Literal[
+    "NAMESPACE", "APP_TYPE", "VIRTUAL_HOST", "SITE", "SERVICE", "INSTANCE", "WAF_INSTANCE_ID", "RULE_ID",
+    "RULE_SEVERITY", "RULE_TAG", "WAF_MODE", "BOT_TYPE", "BOT_NAME",
+]
+AlertValue = Annotated[str | None, StringConstraints(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_.:\- ]+$")]
+
+
+class WafLabelFilter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: WafMetricLabel
+    op: Literal["EQ", "NEQ"] = "EQ"
+    value: Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^[^\x00-\x1f\x7f]+$")]
+
+
+class AlertMatcher(Matcher):
+    field: Literal["alertname", "severity"]
 
 # --- security posture -----------------------------------------------------------
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
@@ -119,7 +140,10 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         key = f"{ns}/{ref['name']}"
         if key not in cache:
             if not rt.settings.namespace_allowed(ns):
-                cache[key] = "unknown (namespace not allow-listed)"
+                # Typically a WAF in "shared": reading it only needs that namespace in the
+                # allow-list (writes to shared stay refused regardless).
+                cache[key] = (f"unknown (namespace {sanitize.text(ns, 63)!r} not allow-listed: add it to "
+                              "F5XC_ALLOWED_NAMESPACES for read access)")
             else:
                 fw = await rt.xc("GET", catalog.kind_path(fw_kind, "get", namespace=ns, name=ref["name"]))
                 spec = fw.get("spec", {}) if isinstance(fw, dict) else {}
@@ -408,6 +432,246 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         payload = await rt.xc(method, path)
         version = payload.get("version") if isinstance(payload, dict) else None
         return sanitize.envelope("get_waf_signatures_version", {"version": sanitize.text(version, 60)})
+
+    # --- WAF rule hits (false positive triage) ---------------------------------------
+    @rt.tool(mcp, ToolClass.READ, title="WAF rule hits")
+    async def get_waf_rule_hits(
+        namespace: Namespace,
+        ctx: Context,
+        start: TimeSpec = "24h",
+        end: TimeSpec | None = None,
+        group_by: Annotated[list[WafMetricLabel], Field(min_length=1, max_length=4)] = ["RULE_ID", "VIRTUAL_HOST"],  # noqa: B006
+        filters: Annotated[list[WafLabelFilter] | None, Field(max_length=10)] = None,
+        top_k: TopK = 20,
+    ) -> dict:
+        """How many times each WAF rule (signature) matched over the window, per load balancer or any
+        other label (RULE_ID, VIRTUAL_HOST, RULE_SEVERITY, RULE_TAG, WAF_MODE, BOT_NAME...). Sorted by
+        hits: the top rules on a single load balancer are the usual false positive candidates."""
+        rt.require_namespace(namespace)
+        start_s, end_s = time_window(rt.settings, start, end)
+        minutes = max(1, int((parse_time(end_s) - parse_time(start_s)).total_seconds() // 60))
+        body = {"namespace": namespace, "start_time": start_s, "end_time": end_s,
+                "step": f"{minutes}m", "range": f"{minutes}m",  # one data point covering the whole window
+                "group_by": list(dict.fromkeys(group_by)),
+                "label_filter": [{"label": f.label, "op": f.op, "value": f.value} for f in filters or []]}
+        method, path = catalog.data_path("waf.rule_hits", namespace=namespace)
+        payload = await rt.xc(method, path, body=body)
+        series = payload.get("data") if isinstance(payload, dict) else None
+        rows = []
+        for item in series if isinstance(series, list) else []:
+            if not isinstance(item, dict):
+                continue
+            ident = item.get("id") if isinstance(item.get("id"), dict) else {}
+            metrics = item.get("metric") if isinstance(item.get("metric"), list) else []
+            hits = sum(_number(m.get("value")) for m in metrics if isinstance(m, dict))
+            rows.append({"labels": {sanitize.text(k, 40): sanitize.text(v, 120) for k, v in list(ident.items())[:12]},
+                         "hits": hits})
+        rows.sort(key=lambda r: r["hits"], reverse=True)
+        return sanitize.envelope("get_waf_rule_hits", rows[:top_k], namespace=namespace,
+                                 window={"start": start_s, "end": end_s}, series=len(rows),
+                                 truncated=len(rows) > top_k)
+
+    # --- TLS certificate expiry ---------------------------------------------------------
+    async def _get_all(kind_name: str, namespace: str) -> tuple[list[tuple[str, dict[str, Any]]], bool]:
+        """GET every object of a kind in a namespace (max 50). Returns (objects, complete)."""
+        k = catalog.kind(kind_name)
+        try:
+            listing = await rt.xc("GET", catalog.kind_path(k, "list", namespace=namespace))
+        except SecureError:
+            return [], False
+        items = listing.get("items", []) if isinstance(listing, dict) else []
+        names = [i["name"] for i in items if isinstance(i, dict) and isinstance(i.get("name"), str)]
+        complete = len(names) <= MAX_SCANNED
+        semaphore = asyncio.Semaphore(4)
+
+        async def one(name: str) -> tuple[str, dict[str, Any]] | None:
+            nonlocal complete
+            async with semaphore:
+                try:
+                    obj = await rt.xc("GET", catalog.kind_path(k, "get", namespace=namespace, name=name))
+                except SecureError:
+                    complete = False
+                    return None
+            spec = obj.get("spec") if isinstance(obj, dict) and isinstance(obj.get("spec"), dict) else {}
+            return name, spec
+
+        results = await asyncio.gather(*(one(n) for n in names[:MAX_SCANNED]))
+        return [r for r in results if r is not None], complete
+
+    @rt.tool(mcp, ToolClass.READ, title="TLS certificate expiry")
+    async def list_certificate_expiry(
+        namespace: Namespace,
+        ctx: Context,
+        within_days: Annotated[int | None, Field(
+            ge=0, le=3650, description="Only certificates expiring within this many days (expired included).")] = None,
+        include_auto_certs: bool = True,
+        include_chains: bool = False,
+    ) -> dict:
+        """TLS certificates of a namespace sorted by expiry: name, CN, SANs, issuer, expiry date, days
+        left and the load balancers using them. Covers certificate objects, the automatic certificates of
+        HTTP load balancers and, optionally, intermediate certificate chains. Private keys are never read
+        out. Useful before and after a renewal."""
+        rt.require_namespace(namespace)
+        now = datetime.now(UTC)
+        rows: list[dict[str, Any]] = []
+        complete = True
+        sources = [("certificate", "certificate")] + ([("certificate_chain", "chain")] if include_chains else [])
+        for kind_name, source in sources:
+            objects, ok = await _get_all(kind_name, namespace)
+            complete = complete and ok
+            for name, spec in objects:
+                infos = spec.get("infos") if isinstance(spec.get("infos"), list) else []
+                used_by = [f"http_loadbalancer/{r['name']}" for r in map(sanitize.ref, spec.get("http_loadbalancers")
+                                                                         or []) if r]
+                used_by += [f"tcp_loadbalancer/{r['name']}" for r in map(sanitize.ref, spec.get("tcp_loadbalancers")
+                                                                         or []) if r]
+                for info in infos[:10]:
+                    if isinstance(info, dict):
+                        rows.append(_cert_row(source, name, info.get("common_name"),
+                                              info.get("subject_alternative_names"), info.get("issuer"),
+                                              info.get("expiry"), used_by[:50], now))
+        if include_auto_certs:
+            lbs, ok = await _get_all("http_loadbalancer", namespace)
+            complete = complete and ok
+            for name, spec in lbs:
+                auto = spec.get("auto_cert_info")
+                if isinstance(auto, dict) and (auto.get("auto_cert_expiry") or auto.get("auto_cert_subject")):
+                    row = _cert_row("lb_auto_cert", name, auto.get("auto_cert_subject"), None,
+                                    auto.get("auto_cert_issuer"), auto.get("auto_cert_expiry"),
+                                    [f"http_loadbalancer/{sanitize.text(name, 63)}"], now)
+                    row["state"] = sanitize.text(auto.get("auto_cert_state"), 60)
+                    rows.append(row)
+        if within_days is not None:
+            rows = [r for r in rows if r["days_left"] is None or r["days_left"] <= within_days]
+        rows.sort(key=lambda r: (r["days_left"] is None, r["days_left"] if r["days_left"] is not None else 0))
+        return sanitize.envelope(
+            "list_certificate_expiry", rows, namespace=namespace,
+            expired=sum(1 for r in rows if r["days_left"] is not None and r["days_left"] < 0),
+            unknown_expiry=sum(1 for r in rows if r["days_left"] is None),
+            incomplete=not complete,
+        )
+
+    # --- alerts --------------------------------------------------------------------------
+    def _alert_filter(alertname: str | None, severity: str | None) -> str | None:
+        matchers = [AlertMatcher(field=f, value=v) for f, v in (("alertname", alertname), ("severity", severity)) if v]
+        return build_query(matchers) if matchers else None
+
+    @rt.tool(mcp, ToolClass.READ, title="Active alerts")
+    async def list_alerts(
+        namespace: Namespace,
+        ctx: Context,
+        alertname: AlertValue = None,
+        severity: AlertValue = None,
+        include_inactive: bool = False,
+    ) -> dict:
+        """Alerts currently firing in a namespace (optionally filtered by alert name or severity), to
+        put a security investigation in context."""
+        rt.require_namespace(namespace)
+        params: dict[str, Any] = {}
+        if include_inactive:
+            params["inactive"] = "true"
+        query = _alert_filter(alertname, severity)
+        if query:
+            params["filter"] = query
+        method, path = catalog.data_path("alerts.list", namespace=namespace)
+        payload = await rt.xc(method, path, params=params or None)
+        raw = payload.get("data") if isinstance(payload, dict) else None
+        alerts = _alert_items(raw)
+        data = [_project_alert(a) for a in alerts[: rt.settings.max_events]]
+        return sanitize.envelope("list_alerts", data, namespace=namespace, returned=len(data),
+                                 truncated=len(alerts) > len(data))
+
+    @rt.tool(mcp, ToolClass.READ, title="Alerts history")
+    async def query_alerts_history(
+        namespace: Namespace,
+        ctx: Context,
+        start: TimeSpec = "24h",
+        end: TimeSpec | None = None,
+        alertname: AlertValue = None,
+        severity: AlertValue = None,
+    ) -> dict:
+        """Alerts raised in a namespace over a time window."""
+        rt.require_namespace(namespace)
+        start_s, end_s = time_window(rt.settings, start, end)
+        params: dict[str, Any] = {"start_time": start_s, "end_time": end_s}
+        query = _alert_filter(alertname, severity)
+        if query:
+            params["filter"] = query
+        method, path = catalog.data_path("alerts.history", namespace=namespace)
+        payload = await rt.xc(method, path, params=params)
+        alerts = _alert_items(payload.get("alerts") if isinstance(payload, dict) else None)
+        data = [_project_alert(a) for a in alerts[: rt.settings.max_events]]
+        return sanitize.envelope("query_alerts_history", data, namespace=namespace,
+                                 window={"start": start_s, "end": end_s}, returned=len(data),
+                                 total_hits=sanitize.text(payload.get("total_hits") if isinstance(payload, dict)
+                                                          else None, 20))
+
+
+MAX_SCANNED = 50
+
+
+def _cert_row(source: str, name: str, cn: Any, sans: Any, issuer: Any, expiry: Any, used_by: list[str],
+              now: datetime) -> dict[str, Any]:
+    days_left = None
+    if isinstance(expiry, str) and expiry:
+        try:
+            when = datetime.fromisoformat(expiry.strip().replace("Z", "+00:00"))
+            when = when if when.tzinfo else when.replace(tzinfo=UTC)
+            days_left = (when - now).days
+        except ValueError:
+            days_left = None
+    return {
+        "source": source,
+        "name": sanitize.text(name, 63),
+        "common_name": sanitize.text(cn, 253),
+        "subject_alternative_names": [sanitize.text(s, 253) for s in sans[:20]] if isinstance(sans, list) else [],
+        "issuer": sanitize.text(issuer, 200),
+        "expiry": sanitize.text(expiry, 40),
+        "days_left": days_left,
+        "used_by": used_by,
+    }
+
+
+def _number(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number == number and abs(number) != float("inf") else 0.0
+
+
+def _alert_items(raw: Any) -> list[Any]:
+    """Alerts come as a list or as a JSON string holding one (``data`` is typed string)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if isinstance(raw, dict):
+        raw = raw.get("alerts") or raw.get("data") or []
+    return [a for a in raw if isinstance(a, dict | str)] if isinstance(raw, list) else []
+
+
+def _project_alert(alert: Any) -> dict[str, Any]:
+    """Alert fields that help an investigation; free text (annotations) is bounded and single-line."""
+    if isinstance(alert, str):
+        try:
+            alert = json.loads(alert)
+        except ValueError:
+            return {"unparsed": True}
+    if not isinstance(alert, dict):
+        return {"unparsed": True}
+    labels = alert.get("labels") if isinstance(alert.get("labels"), dict) else {}
+    annotations = alert.get("annotations") if isinstance(alert.get("annotations"), dict) else {}
+    status = alert.get("status")
+    return {
+        "labels": {sanitize.text(k, 40): sanitize.text(v, 120) for k, v in list(labels.items())[:16]},
+        "summary": sanitize.text(annotations.get("summary"), 200),
+        "description": sanitize.text(annotations.get("description"), 300),
+        "state": sanitize.text(status.get("state") if isinstance(status, dict) else status, 40),
+        "starts_at": sanitize.text(alert.get("startsAt") or alert.get("starts_at"), 40),
+        "ends_at": sanitize.text(alert.get("endsAt") or alert.get("ends_at"), 40),
+    }
 
 
 def _buckets(payload: Any) -> list[dict[str, Any]]:

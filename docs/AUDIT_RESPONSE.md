@@ -71,7 +71,9 @@ corrigé ; chaque règle a maintenant des cas positifs et négatifs testés par
 | Un objet créé n'est référencé par rien, ou c'est signalé | Vérifié dans le namespace (était partiel : F-03) | `test_F03_*` ; référents d'autres types ou namespaces non couverts |
 | Champs exacts de `app_firewall_detection_control` | Vérifié | Spec : `exclude_attack_type_contexts`, `exclude_bot_name_contexts`, `exclude_signature_contexts`, `exclude_violation_contexts` |
 | Le replace réécrit `labels`, `annotations`, `description`, `disable` | Vérifié (spec) | Spec : `replace_metadata_fields` |
-| L'API n'offre aucune précondition de version sur PUT | Vérifié (spec) | Spec : paramètres du PUT = chemin + corps ; aucun `resource_version`/`If-Match`/`etag` dans le PUT et ses schémas |
+| L'API n'offre aucune précondition de version sur PUT | Vérifié (2 sources) | Spec des pages de doc : paramètres du PUT = chemin + corps ; aucun `resource_version`/`If-Match`/`etag`. Spec OpenAPI 3.0 officielle du HTTP LB fournie séparément (`openapi.json`, SHA-256 `f1db9347…52a6`) : même résultat, aucun `If-Match`/`ETag` dans tout le fichier |
+| Le catalogue reflète la spec officielle du HTTP LB | Vérifié | Même `openapi.json` : 24/24 groupes oneof et 89/89 champs de spec identiques à `catalog.json` ; chemins utilisés présents (la suggestion d'exclusion WAF est documentée dans la spec App Security, pas dans celle du LB) |
+| Seuls les types réellement modifiés par les outils sont `writable` | Vérifié | 8 types (contre 19 avant) ; `test_writable_flag_matches_what_the_write_tools_modify` |
 | `whoami` renvoie le propriétaire d'un token API | Non vérifié | Spec : champs documentés ; comportement réel = `f5xc-waap-mcp check` |
 | Le client affiche le diff complet dans l'élicitation | Non vérifié | partie E |
 | Un modèle suit une instruction cachée | Non vérifié | partie E (la transmission est désormais bloquée : F-01) |

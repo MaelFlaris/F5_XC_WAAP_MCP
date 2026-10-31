@@ -12,6 +12,18 @@
    "operation": "ves.io.schema.log.CustomAPI.AccessLogQueryV2",
    "path": "/api/data/namespaces/{namespace}/access_logs"
   },
+  "alerts.history": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/alert",
+   "method": "GET",
+   "operation": "ves.io.schema.alert.CustomAPI.AlertsHistory",
+   "path": "/api/data/namespaces/{namespace}/alerts/history"
+  },
+  "alerts.list": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/alert",
+   "method": "GET",
+   "operation": "ves.io.schema.alert.CustomAPI.Alerts",
+   "path": "/api/data/namespaces/{namespace}/alerts"
+  },
   "audit_logs.query": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/log",
    "method": "POST",
@@ -77,6 +89,12 @@
    "method": "GET",
    "operation": "ves.io.schema.waf_signatures_changelog.WafSignaturesAPI.GetLatestVersion",
    "path": "/api/waf/latest-signatures-version"
+  },
+  "waf.rule_hits": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/waf",
+   "method": "POST",
+   "operation": "ves.io.schema.waf.WAFMonitoringAPI.ServerRuleHitsMetrics",
+   "path": "/api/data/namespaces/{namespace}/wafs/metrics/server/rule_hits"
   },
   "waf_exclusion.suggest": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/app-security",
@@ -175,7 +193,7 @@
     "strict_schema_origin",
     "swagger_specs"
    ],
-   "writable": true
+   "writable": false
   },
   "api_discovery": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/api-sec-api-discovery",
@@ -192,7 +210,7 @@
     "custom_auth_types",
     "user_defined_api_discovery_policy"
    ],
-   "writable": true
+   "writable": false
   },
   "api_testing": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/api-sec-api-testing",
@@ -244,7 +262,7 @@
     "elements",
     "http_loadbalancer"
    ],
-   "writable": true
+   "writable": false
   },
   "app_firewall": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/app-firewall",
@@ -320,7 +338,7 @@
    "spec_fields": [
     "app_type_settings"
    ],
-   "writable": true
+   "writable": false
   },
   "app_type": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/app-type",
@@ -337,7 +355,46 @@
     "business_logic_markup_setting",
     "features"
    ],
-   "writable": true
+   "writable": false
+  },
+  "bigip_virtual_server": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/views-bigip-virtual-server",
+   "family": "load_balancing",
+   "oneofs": {
+    "api_definition_choice": [
+     "api_specification",
+     "disable_api_definition"
+    ],
+    "api_discovery_choice": [
+     "disable_api_discovery",
+     "enable_api_discovery"
+    ],
+    "sensitive_data_policy_choice": [
+     "default_sensitive_data_policy",
+     "sensitive_data_policy"
+    ]
+   },
+   "paths": {
+    "get": "/api/config/namespaces/{namespace}/bigip_virtual_servers/{name}",
+    "list": "/api/config/namespaces/{namespace}/bigip_virtual_servers",
+    "replace": "/api/config/namespaces/{metadata.namespace}/bigip_virtual_servers/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "api_specification",
+    "bigip_hostname",
+    "bigip_version",
+    "bigip_vs_description",
+    "default_sensitive_data_policy",
+    "disable_api_definition",
+    "disable_api_discovery",
+    "enable_api_discovery",
+    "sensitive_data_policy",
+    "server_name",
+    "service_discovery",
+    "type"
+   ],
+   "writable": false
   },
   "bot_defense_app_infrastructure": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/views-bot-defense-app-infrastructure",
@@ -360,6 +417,22 @@
     "data_center_hosted",
     "environment_type",
     "traffic_type"
+   ],
+   "writable": false
+  },
+  "cdn_cache_rule": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/cdn-cache-rule",
+   "family": "load_balancing",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/cdn_cache_rules",
+    "get": "/api/config/namespaces/{namespace}/cdn_cache_rules/{name}",
+    "list": "/api/config/namespaces/{namespace}/cdn_cache_rules",
+    "replace": "/api/config/namespaces/{metadata.namespace}/cdn_cache_rules/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "cache_rules"
    ],
    "writable": false
   },
@@ -506,7 +579,7 @@
     "user_identification",
     "waf_exclusion"
    ],
-   "writable": true
+   "writable": false
   },
   "certificate": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/certificate",
@@ -541,6 +614,23 @@
     "tcp_loadbalancers",
     "use_system_defaults",
     "virtual_host_auto_cert"
+   ],
+   "writable": false
+  },
+  "certificate_chain": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/certificate-chain",
+   "family": "load_balancing",
+   "oneofs": {},
+   "paths": {
+    "create": "/api/config/namespaces/{metadata.namespace}/certificate_chains",
+    "get": "/api/config/namespaces/{namespace}/certificate_chains/{name}",
+    "list": "/api/config/namespaces/{namespace}/certificate_chains",
+    "replace": "/api/config/namespaces/{metadata.namespace}/certificate_chains/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "certificate_url",
+    "infos"
    ],
    "writable": false
   },
@@ -1130,7 +1220,7 @@
    "spec_fields": [
     "mitigation_type"
    ],
-   "writable": true
+   "writable": false
   },
   "network_firewall": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/network-firewall",
@@ -1208,7 +1298,7 @@
     "upstream_conn_pool_reuse_type",
     "use_tls"
    ],
-   "writable": true
+   "writable": false
   },
   "policer": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/policer",
@@ -1242,6 +1332,23 @@
    "sensitive": false,
    "spec_fields": [
     "protocol_policer"
+   ],
+   "writable": false
+  },
+  "public_ip": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/public-ip",
+   "family": "load_balancing",
+   "oneofs": {},
+   "paths": {
+    "get": "/api/config/namespaces/{namespace}/public_ips/{name}",
+    "list": "/api/config/namespaces/{namespace}/public_ips",
+    "replace": "/api/config/namespaces/{metadata.namespace}/public_ips/{metadata.name}"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "ip",
+    "ipv6",
+    "virtual_sites"
    ],
    "writable": false
   },
@@ -1305,7 +1412,7 @@
     "custom_data_types",
     "disabled_predefined_data_types"
    ],
-   "writable": true
+   "writable": false
   },
   "service_policy": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/service-policy",
@@ -1419,6 +1526,20 @@
    ],
    "writable": false
   },
+  "service_policy_set": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/service-policy-set",
+   "family": "policies",
+   "oneofs": {},
+   "paths": {
+    "get": "/api/config/namespaces/{namespace}/service_policy_sets/{name}",
+    "list": "/api/config/namespaces/{namespace}/service_policy_sets"
+   },
+   "sensitive": false,
+   "spec_fields": [
+    "policies"
+   ],
+   "writable": false
+  },
   "tcp_loadbalancer": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/views-tcp-loadbalancer",
    "family": "load_balancing",
@@ -1498,7 +1619,7 @@
     "tls_tcp",
     "tls_tcp_auto_cert"
    ],
-   "writable": true
+   "writable": false
   },
   "trusted_ca_list": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/trusted-ca-list",
@@ -1531,7 +1652,7 @@
    "spec_fields": [
     "rules"
    ],
-   "writable": true
+   "writable": false
   },
   "waf_exclusion_policy": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/waf-exclusion-policy",
