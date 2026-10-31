@@ -34,7 +34,7 @@ def main() -> int:
     sys.stderr.write(json.dumps({
         "event": "startup", "tenant": settings.tenant, "mode": settings.mode, "transport": settings.transport,
         "writes_enabled": settings.writes_enabled, "namespaces": list(settings.allowed_namespaces),
-        "tools": sorted(rt.registered),
+        "topics": sorted(settings.enabled_topics), "tools": sorted(rt.registered),
     }) + "\n")
     run(mcp, settings)
     return 0

@@ -31,6 +31,7 @@ class Code(StrEnum):
     NAMESPACE_FORBIDDEN = "namespace_forbidden"
     NAMESPACE_PROTECTED = "namespace_protected"
     KIND_NOT_WRITABLE = "kind_not_writable"
+    TOPIC_DISABLED = "topic_disabled"
     SENSITIVE_KIND = "sensitive_kind"
     INVALID_ARGUMENT = "invalid_argument"
     RATE_LIMITED = "rate_limited"
@@ -64,6 +65,7 @@ MESSAGES: dict[Code, str] = {
                                "without a named identity.",
     Code.NAMESPACE_FORBIDDEN: "Namespace is not in the server allow-list.",
     Code.NAMESPACE_PROTECTED: "Namespace is protected and cannot be modified through this server.",
+    Code.TOPIC_DISABLED: "This subject is not enabled on this server (F5XC_MCP_TOPICS).",
     Code.KIND_NOT_WRITABLE: "This object kind is read-only in this server.",
     Code.SENSITIVE_KIND: "This object kind may hold secrets: only the summary view is available.",
     Code.INVALID_ARGUMENT: "Invalid argument.",

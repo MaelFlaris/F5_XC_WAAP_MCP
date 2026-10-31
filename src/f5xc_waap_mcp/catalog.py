@@ -111,10 +111,12 @@ def data_path(endpoint_id: str, **params: str) -> tuple[str, str]:
     return endpoint.method, render(endpoint.path, params)
 
 
-def describe() -> dict[str, Any]:
-    """Catalogue overview returned by the ``list_supported_kinds`` tool."""
+def describe(enabled_topics: frozenset[str] | None = None) -> dict[str, Any]:
+    """Catalogue overview returned by the ``list_supported_kinds`` tool (enabled subjects only)."""
     families: dict[str, list[dict[str, Any]]] = {}
     for k in KINDS.values():
+        if enabled_topics is not None and k.family not in enabled_topics:
+            continue
         families.setdefault(k.family, []).append(
             {"kind": k.name, "writable": k.writable, "sensitive": k.sensitive, "doc": k.doc}
         )

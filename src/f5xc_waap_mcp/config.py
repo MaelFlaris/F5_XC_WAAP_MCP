@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from .topics import resolve_topics
+
 XC_DOMAIN_SUFFIX = ".console.ves.volterra.io"
 XC_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 TENANT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")
@@ -96,6 +98,8 @@ class Settings(BaseSettings):
 
     plan_ttl_s: Annotated[int, Field(ge=30, le=900, validation_alias="F5XC_MCP_PLAN_TTL_S")] = 300
     min_ipv4_prefix_len: Annotated[int, Field(ge=8, le=32, validation_alias="F5XC_MCP_MIN_IPV4_PREFIX_LEN")] = 16
+    # Subjects enabled (see topics.py): "all", "waf,posture", "all,-dns".
+    topics: Annotated[tuple[str, ...], NoDecode, Field(validation_alias="F5XC_MCP_TOPICS")] = ("all",)
     # Operations: while this file exists every write tool refuses (no restart needed).
     write_kill_switch: Annotated[str | None, Field(validation_alias="F5XC_MCP_WRITE_KILL_SWITCH")] = None
     # Operations: directory where the pre-change state of each applied replace is
@@ -109,6 +113,17 @@ class Settings(BaseSettings):
         bool, Field(validation_alias="F5XC_MCP_ALLOW_SERVICE_CREDENTIALS")
     ] = False
     audit_path: Annotated[str | None, Field(validation_alias="F5XC_MCP_AUDIT_LOG")] = None
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def _split_topics(cls, value: object) -> object:
+        return _csv(value)
+
+    @field_validator("topics")
+    @classmethod
+    def _check_topics(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        resolve_topics(value)  # unknown names fail at startup
+        return value
 
     @field_validator("allowed_namespaces", "allowed_hosts", "allowed_origins", mode="before")
     @classmethod
@@ -182,6 +197,13 @@ class Settings(BaseSettings):
                 "in the X-F5XC-API-Token header"
             )
         return self
+
+    @property
+    def enabled_topics(self) -> frozenset[str]:
+        return resolve_topics(self.topics)
+
+    def topic_enabled(self, topic: str) -> bool:
+        return topic in self.enabled_topics
 
     @property
     def writes_enabled(self) -> bool:

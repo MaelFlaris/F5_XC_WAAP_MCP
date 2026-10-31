@@ -8,6 +8,7 @@ from pydantic import Field, StringConstraints
 from .. import catalog, sanitize
 from ..errors import Code, SecureError
 from ..runtime import Runtime, ToolClass
+from ..topics import TOPICS
 from .common import Namespace, ObjectName
 
 LabelFilter = Annotated[
@@ -20,12 +21,14 @@ LabelFilter = Annotated[
 def register(mcp: FastMCP, rt: Runtime) -> None:
     @rt.tool(mcp, ToolClass.READ, title="List supported object kinds")
     async def list_supported_kinds(ctx: Context) -> dict:
-        """List the F5 XC object kinds this server can read (and which ones it can modify),
-        grouped by family: load_balancing, waf, policies, bot_and_users, api_security,
-        network_security, dns, observability. Each entry links to the official API doc."""
+        """List the F5 XC object kinds this server can read (and which ones it can modify), grouped by
+        subject (topic), with the enabled subjects. Each entry links to the official API doc."""
+        enabled = rt.settings.enabled_topics
         return sanitize.envelope(
-            "list_supported_kinds", catalog.describe(), writes_enabled=rt.settings.writes_enabled,
+            "list_supported_kinds", catalog.describe(enabled), writes_enabled=rt.settings.writes_enabled,
             allowed_namespaces=list(rt.settings.allowed_namespaces),
+            enabled_topics={t: TOPICS[t] for t in sorted(enabled)},
+            disabled_topics=sorted(set(TOPICS) - enabled),
         )
 
     @rt.tool(mcp, ToolClass.READ, title="List namespaces")
@@ -51,6 +54,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         Use get_object for the configuration of one object."""
         rt.require_namespace(namespace)
         k = catalog.kind(kind)
+        rt.require_kind_topic(k)
         params = {"label_filter": label_filter} if label_filter else None
         payload = await rt.xc("GET", catalog.kind_path(k, "list", namespace=namespace), params=params)
         items = payload.get("items", []) if isinstance(payload, dict) else []
@@ -77,6 +81,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         """Read one configuration object (e.g. an http_loadbalancer, app_firewall, service_policy)."""
         rt.require_namespace(namespace)
         k = catalog.kind(kind)
+        rt.require_kind_topic(k)
         if view == "spec" and k.sensitive:
             raise SecureError(Code.SENSITIVE_KIND)
         params = {"response_format": "GET_RSP_FORMAT_REFERRING_OBJECTS"} if view == "referrers" else None

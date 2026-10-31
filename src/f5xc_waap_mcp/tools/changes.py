@@ -461,6 +461,7 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         service policy, IP prefix set, rate limiter, WAF exclusion policy, health check). Attaching it to a
         load balancer is a separate, reviewed change."""
         k = writable(kind, namespace)
+        rt.require_kind_topic(k)
         check_spec(k, spec)
         referrers, complete = await existing_references(kind, namespace, name)
         extra = [f"already referenced by {r}: creating it activates it immediately" for r in referrers]

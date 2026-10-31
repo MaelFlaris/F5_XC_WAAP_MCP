@@ -1,5 +1,7 @@
 # Fonctionnalités F5 Distributed Cloud WAAP et couverture du serveur MCP
 
+Les outils et les types d'objets sont regroupés par **sujet** (`F5XC_MCP_TOPICS`, voir le README) : `load_balancing`, `waf`, `policies`, `ddos`, `bot_and_users`, `api_security`, `network_security`, `dns`, `observability`, `events_logs`, `posture` (+ `core`, toujours actif). Chaque section ci-dessous correspond à un ou plusieurs sujets.
+
 Liste établie à partir de la référence API officielle
 (<https://docs.cloud.f5.com/docs-v2/api>, 283 objets publiés). Chaque page de la
 référence embarque la spécification OpenAPI de l'objet. Les chemins utilisés par le

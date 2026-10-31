@@ -21,6 +21,43 @@ docs.cloud.f5.com).
 - Modèle de menaces : [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
 - Points à valider sur un tenant : [docs/UNCERTAINTIES.md](docs/UNCERTAINTIES.md)
 
+## Sujets : n'activer que ce dont on a besoin
+
+Les outils et les types d'objets sont regroupés par **sujet**. Chaque sujet s'active
+individuellement avec `F5XC_MCP_TOPICS` (défaut : `all`). Un outil dont le sujet est
+désactivé n'est **pas enregistré** : il n'existe pas pour le modèle, ce qui réduit la
+liste d'outils (donc les tokens) et la surface d'attaque.
+
+| Sujet | Outils | Types d'objets lisibles |
+|---|---|---|
+| `core` (toujours actif) | `list_supported_kinds`, `list_namespaces`, `list_objects`, `get_object`, `plan_create_object` | — |
+| `load_balancing` | `get_lb_dns_info`, `get_lb_performance`, `list_certificate_expiry` | LB HTTP/TCP/CDN, origin pools, health checks, certificats, chaînes, CA, BIG-IP, IP publiques |
+| `waf` | `get_waf_signatures_version`, `get_waf_rule_hits`, `suggest_waf_exclusion_rule`, `plan_set_lb_waf`, `plan_set_waf_mode`, `plan_add_waf_exclusion_rule` | App Firewall, WAF exclusion policies |
+| `policies` | `get_active_service_policies`, `plan_update_ip_prefix_set` | service policies, rate limiters, IP prefix sets, forward proxy, policers |
+| `ddos` | `get_lb_dos_mitigation_rules` | — |
+| `bot_and_users` | — | bot defense, malicious users, app settings, app types |
+| `api_security` | — | API definitions, groupes, discovery, sensitive data |
+| `network_security` | — | network firewalls, Fast ACL |
+| `dns` | — | zones, DNS LB, pools, health checks, geo sets |
+| `observability` | `list_alerts`, `query_alerts_history` | alert policies, receivers, log receivers |
+| `events_logs` | `query_security_events`, `aggregate_security_events`, `query_security_incidents`, `query_suspicious_users`, `query_access_logs`, `aggregate_access_logs`, `query_audit_logs` | — |
+| `posture` | `get_lb_security_posture`, `audit_namespace_security` | — |
+
+```bash
+F5XC_MCP_TOPICS=all                       # tout (défaut)
+F5XC_MCP_TOPICS=waf,posture,events_logs   # seulement ceux-là (+ core)
+F5XC_MCP_TOPICS=all,-dns,-bot_and_users   # tout sauf ceux-là
+```
+
+- Un nom inconnu empêche le démarrage (la liste valide est affichée).
+- Les types d'objets d'un sujet désactivé sont refusés par `list_objects`, `get_object` et
+  `plan_create_object` (`topic_disabled`) ; `list_supported_kinds` ne montre que les sujets actifs.
+- **Un sujet n'accorde jamais l'écriture** : les outils `plan_*` d'un sujet n'existent que si
+  `F5XC_MCP_MODE=write` et `F5XC_MCP_ENABLE_WRITES=true`. `apply_plan` et `plan_revert` n'existent
+  que si au moins un outil d'écriture existe.
+- Les outils de posture et d'audit lisent en interne les LB et les WAF même si `load_balancing`
+  ou `waf` sont désactivés : ce sont des lectures internes de l'outil, pas des outils exposés.
+
 ## Outils
 
 **Lecture (toujours disponibles)**
@@ -114,6 +151,7 @@ python -I scripts/mutate_guards.py . mutation.json  # chaque garde-fou doit êtr
 | `F5XC_TENANT` | (obligatoire) | Identifiant court du tenant : `https://<tenant>.console.ves.volterra.io` |
 | `F5XC_ALLOWED_NAMESPACES` | (obligatoire) | Liste séparée par des virgules ; tout autre namespace est refusé |
 | `F5XC_API_TOKEN` | — | stdio uniquement : **ton** token API personnel. Interdit en mode HTTP |
+| `F5XC_MCP_TOPICS` | `all` | Sujets activés : `all`, `waf,posture`, `all,-dns` (voir « Sujets ») |
 | `F5XC_MCP_MODE` | `read` | `read` ou `write` |
 | `F5XC_MCP_ENABLE_WRITES` | `false` | Doit aussi valoir `true` pour activer l'écriture |
 | `F5XC_MCP_TRANSPORT` | `stdio` | `stdio` ou `streamable-http` |

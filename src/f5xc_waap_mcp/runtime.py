@@ -30,6 +30,7 @@ from .errors import Code, SecureError
 from .guardrails import Guardrails
 from .identity import IdentityResolver, Principal
 from .plans import PlanStore
+from .topics import TOOL_TOPICS, WRITES
 from .xc_client import XCClient
 
 TOKEN_HEADER = "x-f5xc-api-token"  # noqa: S105 - header name, not a secret
@@ -133,9 +134,23 @@ class Runtime:
     def allowed(self, cls: ToolClass) -> bool:
         return cls is ToolClass.READ or self.settings.writes_enabled
 
+    def topic_allows(self, name: str) -> bool:
+        """Is the tool's subject enabled? Every tool must be listed in topics.TOOL_TOPICS."""
+        topic = TOOL_TOPICS.get(name)
+        if topic is None:
+            raise RuntimeError(f"tool {name!r} has no topic in topics.TOOL_TOPICS")
+        if topic == WRITES:  # apply/revert exist only if some write tool exists
+            return any(c is ToolClass.WRITE for c in self.registered.values())
+        return self.settings.topic_enabled(topic)
+
+    def require_kind_topic(self, kind: Any) -> None:
+        """Object kinds follow the topic of their catalogue family."""
+        if not self.settings.topic_enabled(kind.family):
+            raise SecureError(Code.TOPIC_DISABLED, f"Kind {kind.name} belongs to the {kind.family!r} subject.")
+
     def tool(self, mcp: FastMCP, cls: ToolClass, *, title: str, idempotent: bool = True) -> Callable:
         def decorator(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
-            if not self.allowed(cls):
+            if not self.topic_allows(fn.__name__) or not self.allowed(cls):
                 return fn  # not registered: the tool does not exist for the client
             wrapped = self._guarded(fn, cls)
             mcp.tool(
