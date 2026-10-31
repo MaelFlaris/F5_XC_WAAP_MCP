@@ -85,7 +85,7 @@ python -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.lock -r requirements-build.lock
 pip install --no-deps --no-build-isolation .
 pytest                                                    # 231 tests, dont propriétés Hypothesis
-python -I scripts/mutate_guards.py . mutation.json        # les 48 garde-fous doivent être tués (exit 1 sinon)
+python -I scripts/mutate_guards.py . mutation.json        # 811c3ad : 48/48 garde-fous tués
 pip install --require-hashes -r requirements-fuzz.lock
 python -I fuzz/fuzz_parsers.py -max_total_time=1800       # c32b709 : 166,7 M exécutions, 0 crash
 python -m venv /tmp/sast && /tmp/sast/bin/pip install --require-hashes -r requirements-sast.lock
