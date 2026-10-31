@@ -138,7 +138,7 @@ def collect_refs(node: Any, path: str = "", out: list[dict[str, str]] | None = N
         if isinstance(node.get("name"), str) and ("namespace" in node or "tenant" in node) and len(node) <= 5:
             r = ref(node)
             if r is not None:
-                out.append({"field": text(path, 120), **r})
+                out.append({"field": path[:120], **r})  # keys were sanitised on the way down
             return out
         for key, value in node.items():
             if not _SECRET_KEY.search(str(key)):
