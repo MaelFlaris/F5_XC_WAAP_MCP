@@ -124,6 +124,7 @@ DATA_ENDPOINTS: dict[str, tuple[str, str, str]] = {
     "waf.rule_hits": ("waf", "post", "/api/data/namespaces/{namespace}/wafs/metrics/server/rule_hits"),
     "alerts.list": ("alert", "get", "/api/data/namespaces/{namespace}/alerts"),
     "alerts.history": ("alert", "get", "/api/data/namespaces/{namespace}/alerts/history"),
+    "graph.service": ("graph-service", "post", "/api/data/namespaces/{namespace}/graph/service"),
 }
 
 NEXT_DATA = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)

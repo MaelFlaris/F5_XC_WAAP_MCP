@@ -60,6 +60,14 @@ WafMetricLabel = Literal[
     "NAMESPACE", "APP_TYPE", "VIRTUAL_HOST", "SITE", "SERVICE", "INSTANCE", "WAF_INSTANCE_ID", "RULE_ID",
     "RULE_SEVERITY", "RULE_TAG", "WAF_MODE", "BOT_TYPE", "BOT_NAME",
 ]
+# Subset of schemagraphMetricType (docs-v2/api/graph-service) relevant to a load balancer.
+PerfMetric = Literal[
+    "HTTP_REQUEST_RATE", "HTTP_ERROR_RATE", "HTTP_ERROR_RATE_4XX", "HTTP_ERROR_RATE_5XX", "HTTP_RESPONSE_LATENCY",
+    "HTTP_RESPONSE_LATENCY_PERCENTILE_50", "HTTP_RESPONSE_LATENCY_PERCENTILE_90",
+    "HTTP_RESPONSE_LATENCY_PERCENTILE_99", "HTTP_APP_LATENCY", "HTTP_SERVER_DATA_TRANSFER_TIME", "CLIENT_RTT",
+    "SERVER_RTT", "REQUEST_THROUGHPUT", "RESPONSE_THROUGHPUT", "ACTIVE_CONNECTIONS", "NEW_CONNECTION_RATE",
+    "TCP_ERROR_RATE", "PEAK_REQUEST_RATE", "PEAK_LATENCY",
+]
 AlertValue = Annotated[str | None, StringConstraints(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_.:\- ]+$")]
 
 
@@ -471,6 +479,47 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                                  window={"start": start_s, "end": end_s}, series=len(rows),
                                  truncated=len(rows) > top_k)
 
+    # --- load balancer performance (console: Overview > Performance) ---------------------
+    @rt.tool(mcp, ToolClass.READ, title="Load balancer performance")
+    async def get_lb_performance(
+        namespace: Namespace,
+        ctx: Context,
+        start: TimeSpec = "1h",
+        end: TimeSpec | None = None,
+        metrics: Annotated[list[PerfMetric], Field(min_length=1, max_length=8)] = [  # noqa: B006
+            "HTTP_REQUEST_RATE", "HTTP_ERROR_RATE_4XX", "HTTP_ERROR_RATE_5XX", "HTTP_RESPONSE_LATENCY_PERCENTILE_90"],
+        virtual_host: Annotated[str | None, StringConstraints(min_length=1, max_length=100, pattern=XC_NAME_PATTERN),
+                                Field(description="Only this virtual host (an HTTP LB 'shop' is usually "
+                                                  "'ves-io-http-loadbalancer-shop').")] = None,
+        include_healthscore: bool = True,
+        top_k: TopK = 20,
+    ) -> dict:
+        """Performance of the HTTP load balancers of a namespace over a window, like the console's
+        Overview > Performance: request rate, 4xx/5xx error rates, latency percentiles, RTT... per
+        virtual host, plus health scores (overall, performance, security) with their reason."""
+        rt.require_namespace(namespace)
+        start_s, end_s = time_window(rt.settings, start, end)
+        minutes = max(1, int((parse_time(end_s) - parse_time(start_s)).total_seconds() // 60))
+        wanted = list(dict.fromkeys(metrics))
+        node: dict[str, Any] = {"metric": {"downstream": wanted, "upstream": wanted}}
+        if include_healthscore:
+            node["healthscore"] = {"types": ["HEALTHSCORE_OVERALL", "HEALTHSCORE_PERFORMANCE", "HEALTHSCORE_SECURITY"]}
+        filters = [{"label": "LABEL_VHOST_TYPE", "op": "EQ", "value": "HTTP_LOAD_BALANCER"}]
+        if virtual_host:
+            filters.append({"label": "LABEL_VHOST", "op": "EQ", "value": virtual_host})
+        body = {"namespace": namespace, "start_time": start_s, "end_time": end_s,
+                "step": f"{minutes}m", "range": f"{minutes}m", "group_by": ["VHOST"],
+                "label_filter": filters, "field_selector": {"node": node}}
+        method, path = catalog.data_path("graph.service", namespace=namespace)
+        payload = await rt.xc(method, path, body=body)
+        graph = payload.get("data") if isinstance(payload, dict) and isinstance(payload.get("data"), dict) else {}
+        nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+        rows = [_perf_row(n) for n in nodes if isinstance(n, dict)]
+        rows.sort(key=lambda r: _perf_value(r, "HTTP_REQUEST_RATE"), reverse=True)
+        return sanitize.envelope("get_lb_performance", rows[:top_k], namespace=namespace,
+                                 window={"start": start_s, "end": end_s}, virtual_hosts=len(rows),
+                                 truncated=len(rows) > top_k)
+
     # --- TLS certificate expiry ---------------------------------------------------------
     async def _get_all(kind_name: str, namespace: str) -> tuple[list[tuple[str, dict[str, Any]]], bool]:
         """GET every object of a kind in a namespace (max 50). Returns (objects, complete)."""
@@ -608,6 +657,47 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
 
 
 MAX_SCANNED = 50
+XC_NAME_PATTERN = r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+
+
+def _last_value(feature: Any) -> float | None:
+    raw = feature.get("raw") if isinstance(feature, dict) else None
+    points = [p for p in raw if isinstance(p, dict)] if isinstance(raw, list) else []
+    return _number(points[-1].get("value")) if points else None
+
+
+def _perf_row(node: dict[str, Any]) -> dict[str, Any]:
+    ident = node.get("id") if isinstance(node.get("id"), dict) else {}
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    metric = data.get("metric") if isinstance(data.get("metric"), dict) else {}
+    row: dict[str, Any] = {
+        "virtual_host": sanitize.text(ident.get("vhost"), 120),
+        "type": sanitize.text(ident.get("virtual_host_type"), 40),
+        "vip": sanitize.text(ident.get("vip"), 64),
+        "site": sanitize.text(ident.get("site"), 63),
+    }
+    for direction in ("downstream", "upstream"):
+        values: dict[str, Any] = {}
+        for item in metric.get(direction, []) if isinstance(metric.get(direction), list) else []:
+            if isinstance(item, dict) and isinstance(item.get("type"), str):
+                values[sanitize.text(item["type"], 60)] = {"value": _last_value(item.get("value")),
+                                                          "unit": sanitize.text(item.get("unit"), 30)}
+        row[direction] = values
+    health = data.get("healthscore") if isinstance(data.get("healthscore"), dict) else {}
+    row["healthscore"] = {
+        sanitize.text(h.get("type"), 40): {"value": _last_value({"raw": h.get("value")}),
+                                           "reason": sanitize.text(h.get("reason"), 200)}
+        for h in (health.get("data") or [])[:6] if isinstance(h, dict)
+    }
+    return row
+
+
+def _perf_value(row: dict[str, Any], metric: str) -> float:
+    for direction in ("downstream", "upstream"):
+        value = row.get(direction, {}).get(metric, {}).get("value")
+        if isinstance(value, float):
+            return value
+    return -1.0
 
 
 def _cert_row(source: str, name: str, cn: Any, sans: Any, issuer: Any, expiry: Any, used_by: list[str],

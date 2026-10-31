@@ -40,6 +40,8 @@ Légende :
 | Exclusions WAF (faux positifs) inline ou en policy | `waf_exclusion` du LB, `waf_exclusion_policy` | L, `suggest_waf_exclusion_rule` ; É (outil) `plan_add_waf_exclusion_rule` (règles inline) ; É (création) pour une policy |
 | Version des signatures d'attaque | `/api/waf/latest-signatures-version` | L |
 | Signatures staged / released par virtual host, threat campaigns | `waf_signatures_changelog` | — |
+| Console Overview > Performance : débit, erreurs 4xx/5xx, latences p50/p90/p99, RTT, scores de santé par LB | `graph/service` (Service Graph) | L (`get_lb_performance`) |
+| Console Overview > Security | events, agrégations, incidents, hits WAF, posture | L (`aggregate_security_events`, `query_security_incidents`, `get_waf_rule_hits`, `audit_namespace_security`) |
 | Hits par règle WAF (tri des faux positifs) | `wafs/metrics/server/rule_hits` | L (`get_waf_rule_hits`) |
 
 ## 3. Policies (contrôle d'accès, débit)

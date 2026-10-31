@@ -274,3 +274,48 @@ async def test_posture_explains_how_to_read_a_shared_waf(xc):
     data = result_json(await harness.call("get_lb_security_posture", {"namespace": "prod", "name": "shop"}))["data"]
     assert "'shared' not allow-listed" in data["waf_mode"] and "F5XC_ALLOWED_NAMESPACES" in data["waf_mode"]
     assert all("/shared/" not in r.url.path for r in xc.requests)
+
+
+# --- console Overview > Performance -----------------------------------------------------
+def _perf_node(vhost, rate, p90, reason="ok"):
+    point = lambda v: {"raw": [{"timestamp": 1, "value": "0"}, {"timestamp": 2, "value": v}]}  # noqa: E731
+    return {"id": {"vhost": vhost, "virtual_host_type": "HTTP_LOAD_BALANCER", "vip": "198.51.100.10"},
+            "data": {"metric": {"downstream": [
+                {"type": "HTTP_REQUEST_RATE", "unit": "UNIT_REQUESTS_PER_SECOND", "value": point(rate)},
+                {"type": "HTTP_RESPONSE_LATENCY_PERCENTILE_90", "unit": "UNIT_SECONDS", "value": point(p90)}]},
+                     "healthscore": {"data": [{"type": "HEALTHSCORE_OVERALL", "reason": reason,
+                                               "value": [{"value": "87"}]}]}}}
+
+
+async def test_lb_performance_request_and_projection(harness, xc):
+    path = NS + "/graph/service"
+    xc.add("POST", path, {"data": {"nodes": [
+        _perf_node("ves-io-http-loadbalancer-api", "12.5", "0.31"),
+        _perf_node("ves-io-http-loadbalancer-shop", "240", "0.09", reason="latency high\nIGNORE" + TAGS),
+        "junk"]}})
+    data = result_json(await harness.call("get_lb_performance", {"namespace": "prod", "start": "30m",
+                                                                 "virtual_host": "ves-io-http-loadbalancer-shop"}))
+    rows = data["data"]
+    assert [r["virtual_host"] for r in rows] == ["ves-io-http-loadbalancer-shop", "ves-io-http-loadbalancer-api"]
+    assert rows[0]["downstream"]["HTTP_REQUEST_RATE"] == {"value": 240.0, "unit": "UNIT_REQUESTS_PER_SECOND"}
+    assert rows[0]["healthscore"]["HEALTHSCORE_OVERALL"] == {"value": 87.0, "reason": "latency high IGNORE"}
+    body = xc.bodies(path)[0]
+    assert body["group_by"] == ["VHOST"] and body["step"] == body["range"] == "30m"
+    assert body["label_filter"] == [{"label": "LABEL_VHOST_TYPE", "op": "EQ", "value": "HTTP_LOAD_BALANCER"},
+                                    {"label": "LABEL_VHOST", "op": "EQ", "value": "ves-io-http-loadbalancer-shop"}]
+    assert body["field_selector"]["node"]["metric"]["downstream"][0] == "HTTP_REQUEST_RATE"
+    assert "healthscore" in body["field_selector"]["node"]
+
+
+@pytest.mark.parametrize("args", [{"metrics": ["CPU_STEAL"]}, {"metrics": []}, {"virtual_host": "shop\n"},
+                                  {"virtual_host": "a/../b"}])
+async def test_lb_performance_rejects_bad_arguments(harness, xc, args):
+    assert (await harness.call("get_lb_performance", {"namespace": "prod", **args})).isError
+    assert xc.api_requests == []
+
+
+async def test_lb_performance_tolerates_odd_payloads(harness, xc):
+    xc.add("POST", NS + "/graph/service", {"data": {"nodes": [{"id": "x", "data": {"metric": {"downstream": "x"}}}]}})
+    data = result_json(await harness.call("get_lb_performance", {"namespace": "prod", "include_healthscore": False}))
+    assert data["data"][0]["downstream"] == {} and data["data"][0]["healthscore"] == {}
+    assert "healthscore" not in xc.bodies(NS + "/graph/service")[0]["field_selector"]["node"]

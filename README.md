@@ -41,6 +41,7 @@ docs.cloud.f5.com).
 | `suggest_waf_exclusion_rule` | Règle d'exclusion proposée par XC pour un faux positif |
 | `get_lb_dos_mitigation_rules`, `get_lb_dns_info`, `get_waf_signatures_version` | DDoS auto-mitigation, infos DNS du LB, version des signatures |
 | `get_waf_rule_hits` | Nombre de déclenchements par règle WAF (et par LB, sévérité, tag…), trié : les candidats faux positifs |
+| `get_lb_performance` | Équivalent de Overview > Performance : débit, erreurs 4xx/5xx, latences, RTT et scores de santé par LB |
 | `list_alerts`, `query_alerts_history` | Alertes actives et historique, pour contextualiser une analyse |
 | `list_certificate_expiry` | Certificats TLS triés par expiration : CN, SAN, émetteur, jours restants, LB utilisateurs ; inclut les certificats automatiques des LB ; la clé privée n'est jamais lue |
 

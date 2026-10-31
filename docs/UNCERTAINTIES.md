@@ -36,6 +36,10 @@ vérifiés sur un tenant de test (token en lecture seule d'abord).
    XC accepte qu'un LB ou une policy référence un objet qui n'existe pas encore (le
    format de réponse `GET_RSP_FORMAT_BROKEN_REFERENCES` le suggère). La liste des types
    référents (`REFERENCERS` dans `tools/changes.py`) est à valider.
-8. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
+8. **Métriques de performance (`get_lb_performance`).** Le sens `downstream` / `upstream`
+   pour un nœud « virtual host » n'est pas précisé dans la référence : l'outil demande les
+   deux et les renvoie séparément. Le nom de virtual host d'un LB HTTP (`ves-io-http-loadbalancer-<nom>`)
+   et le format des alertes (`data` est typé chaîne) sont aussi à confirmer sur un tenant.
+9. **Pagination des listes.** Les opérations List n'ont pas de pagination documentée
    (seulement `label_filter` / `report_fields`). Le serveur tronque à
    `F5XC_MCP_MAX_ITEMS` et l'indique (`truncated: true`).

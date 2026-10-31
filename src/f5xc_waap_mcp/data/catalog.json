@@ -30,6 +30,12 @@
    "operation": "ves.io.schema.log.CustomAPI.AuditLogQueryV2",
    "path": "/api/data/namespaces/{namespace}/audit_logs"
   },
+  "graph.service": {
+   "doc": "https://docs.cloud.f5.com/docs-v2/api/graph-service",
+   "method": "POST",
+   "operation": "ves.io.schema.graph.service.CustomAPI.Query",
+   "path": "/api/data/namespaces/{namespace}/graph/service"
+  },
   "http_loadbalancer.dns_info": {
    "doc": "https://docs.cloud.f5.com/docs-v2/api/views-http-loadbalancer",
    "method": "GET",
