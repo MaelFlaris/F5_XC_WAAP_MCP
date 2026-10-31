@@ -40,6 +40,16 @@ tenant ou un vrai client MCP).
 | F-17 | Moyenne | Corrigé | Nouveau, en partie introduit par le correctif F-02. Les raisons HIGH RISK inséraient sans échappement le nom de la règle d'exclusion, `suffix_value`, `exact_value` et les chemins de champs des référents (clés venant de XC) : un saut de ligne fabriquait de fausses lignes dans le bandeau. Valeurs échappées en JSON (`shown()`), et chaque raison réduite à une ligne dans `confirmation_message` | `test_F17_*` |
 | F-16 | Moyenne | Partiel | Nouveau. Image : 271 vulnérabilités Debian (2 CRITICAL, 59 HIGH) et `pip 25.0.1` (6 CVE). Base trixie (164, 0 CRITICAL, 44 HIGH, toutes sans correctif publié) ; pip retiré de l'image ; Trivy en CI bloquant sur toute HIGH/CRITICAL corrigeable | Trivy 0.76.1 et OSV-Scanner 2.7.0 sur l'image construite |
 
+### Deuxième revue (N1 à N5)
+
+| ID | Sév. | État | Correctif | Preuve |
+|---|---|---|---|---|
+| N1 | Moyenne | Corrigé | L'interrupteur d'arrêt est revérifié juste avant le PUT (il pouvait être posé pendant la lecture du diff) | `test_N1_*` (l'interrupteur est posé dans le rappel d'élicitation) ; mutant tué |
+| N2 | Faible | Corrigé | Échec d'écriture du rollback intercepté : le changement appliqué est renvoyé comme appliqué, `rollback_available: false`, événement `rollback_failed` | `test_N2_*` ; mutant tué |
+| N3 | Moyenne | Corrigé | Les secrets ne vont jamais sur disque : marqueur à l'écriture, secret repris de l'objet vivant au revert ; revert refusé si l'emplacement d'un secret a changé ou s'il a disparu | `test_N3_*` (clé privée `clear_secret_info` absente du fichier, secret tourné entre-temps correctement repris) ; mutants tués |
+| N4 | Info | Décidé | Revert du changement d'un autre autorisé (besoin d'exploitation ; le RBAC XC reste la frontière), mais auteur et date dans le résumé, et HIGH RISK : le hash est à retaper | `test_N4_*` ; mutant tué |
+| N5 | Faible | Corrigé | Public Suffix List embarquée (ICANN + privée, version 2026-10-28, MPL-2.0), `scripts/update_psl.py` pour la rafraîchir | `test_N5_*` (`gouv.fr`, `github.io`, règles `*.ck` / `!www.ck`) ; mutant tué |
+
 Défaut de l'outillage d'audit : la règle Semgrep `model-arg-in-fstring-url` ne déclenchait
 pas sur `f"/api/config/namespaces/{name}"`. Son « 0 finding » ne prouvait rien. Motif
 corrigé ; chaque règle a maintenant des cas positifs et négatifs testés par
@@ -57,7 +67,7 @@ corrigé ; chaque règle a maintenant des cas positifs et négatifs testés par
 | Tout changement envoyé à XC apparaît dans le diff, sans ambiguïté | Vérifié (était infirmé : F-06, F-14) | reconstruction exacte, P1, P2 |
 | Les lignes du diff et du bandeau ne peuvent pas être forgées | Vérifié (était infirmé : F-13, F-17) | P3, `test_F13_*`, `test_F17_*`, atheris |
 | Aucun caractère invisible n'atteint le modèle | Vérifié (était infirmé : F-01) | P5, P5b, `test_F01_*` |
-| Une exclusion WAF large déclenche HIGH RISK | Vérifié pour les cas testés | P7b, `test_broad_waf_exclusions_*` ; heuristique sans liste des suffixes publics |
+| Une exclusion WAF large déclenche HIGH RISK | Vérifié pour les cas testés | P7b, `test_broad_waf_exclusions_*`, `test_N5_*` (Public Suffix List) |
 | Un objet créé n'est référencé par rien, ou c'est signalé | Vérifié dans le namespace (était partiel : F-03) | `test_F03_*` ; référents d'autres types ou namespaces non couverts |
 | Champs exacts de `app_firewall_detection_control` | Vérifié | Spec : `exclude_attack_type_contexts`, `exclude_bot_name_contexts`, `exclude_signature_contexts`, `exclude_violation_contexts` |
 | Le replace réécrit `labels`, `annotations`, `description`, `disable` | Vérifié (spec) | Spec : `replace_metadata_fields` |
@@ -74,10 +84,10 @@ corrigé ; chaque règle a maintenant des cas positifs et négatifs testés par
 python -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.lock -r requirements-build.lock
 pip install --no-deps --no-build-isolation .
-pytest                                                    # 214 tests, dont propriétés Hypothesis
-python -I scripts/mutate_guards.py . mutation.json        # 42/42 garde-fous tués
+pytest                                                    # 231 tests, dont propriétés Hypothesis
+python -I scripts/mutate_guards.py . mutation.json        # les 48 garde-fous doivent être tués (exit 1 sinon)
 pip install --require-hashes -r requirements-fuzz.lock
-python -I fuzz/fuzz_parsers.py -max_total_time=1800       # 0 crash attendu
+python -I fuzz/fuzz_parsers.py -max_total_time=1800       # c32b709 : 166,7 M exécutions, 0 crash
 python -m venv /tmp/sast && /tmp/sast/bin/pip install --require-hashes -r requirements-sast.lock
 /tmp/sast/bin/semgrep --test --config .semgrep/rules.yml .semgrep/rules.py
 /tmp/sast/bin/semgrep scan --metrics=off --error --config .semgrep/rules.yml src

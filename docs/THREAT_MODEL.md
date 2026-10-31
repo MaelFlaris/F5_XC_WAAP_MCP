@@ -50,7 +50,10 @@ policies), journaux de sécurité, journal d'audit du serveur.
 - **Image de base.** 44 vulnérabilités HIGH Debian sans correctif publié (util-linux,
   sqlite, ncurses…) restent dans l'image trixie ; le processus ne les invoque pas. La CI
   bloque dès qu'un correctif existe.
-- **Exclusions WAF.** La détection des suffixes publics est heuristique (pas de liste des
-  suffixes publics embarquée).
+- **Exclusions WAF.** Les suffixes publics viennent de la Public Suffix List embarquée :
+  elle doit être rafraîchie (`scripts/update_psl.py`) pour connaître les nouveaux suffixes.
+- **Revert.** N'importe quel utilisateur autorisé en écriture sur le namespace peut annuler
+  le changement d'un autre (décision d'exploitation) ; c'est signalé HIGH RISK avec l'auteur
+  d'origine. Les fichiers de rollback contiennent la configuration (sans secrets) : `0600`.
 - **Heuristiques de posture.** Les constats de `get_lb_security_posture` sont des
   heuristiques, pas un audit de conformité.

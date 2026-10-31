@@ -62,12 +62,18 @@ MUTANTS = [
     # Not listed: _RELATIVE.fullmatch -> match in tools/common.py is an equivalent mutant
     # (the value is strip()-ed first, so no trailing newline can reach the regex).
     ("tools/changes.py", 'if isinstance(prefix, str) and prefix.strip("/") == "":', "if False:", "F-02 path prefix '/'"),
-    ("tools/changes.py", "if len(labels) < 2 or (len(labels) == 2 and all(len(part) <= 3 for part in labels)):", "if False:", "F-02 TLD / public suffix"),
+    ("tools/changes.py", "if isinstance(suffix, str) and is_public_suffix(suffix):", "if False:", "N5 public suffix (PSL)"),
     ("tools/changes.py", "if isinstance(signatures, list) and len(signatures) > MAX_PRECISE_SIGNATURES:", "if False:", "F-02 mass signature exclusion"),
     ("tools/changes.py", "            if not scanned_all:\n                complete = False", "            if not scanned_all:\n                pass", "F-03 incomplete scan reported"),
     ("tools/changes.py", "if kill and os.path.exists(kill):", "if False:", "G kill switch"),
     ("tools/changes.py", "fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)", "fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)", "G rollback file is 0600"),
     ("identity.py", "            if exc.status == 401:", "            if exc.status in (401, 403):", "whoami 403 not negatively cached"),
+    ("tools/changes.py", "            ensure_writes_enabled()\n            await rt.xc(plan.method", "            await rt.xc(plan.method", "N1 kill switch re-checked before PUT"),
+    ("tools/changes.py", "except (OSError, TypeError, ValueError) as exc:", "except ZeroDivisionError as exc:", "N2 rollback failure does not fail an applied change"),
+    ("tools/changes.py", "return {k: SECRET_MARKER if sanitize.is_secret_key(str(k)) else strip_secrets(v) for k, v in node.items()}", "return {k: strip_secrets(v) for k, v in node.items()}", "N3 secrets kept out of rollback files"),
+    ("tools/changes.py", "if live is None or live == SECRET_MARKER:", "if False:", "N3 revert refused when a secret is gone"),
+    ("tools/changes.py", 'if record.get("user_uuid") != rt.identity().principal.user_uuid:', "if False:", "N4 reverting another user's change is HIGH RISK"),
+    ("tools/changes.py", "return text if _PLAIN.fullmatch(text) else json.dumps(text, ensure_ascii=True)[:120]", "return text", "F-17 risk values escaped"),
 ]
 
 

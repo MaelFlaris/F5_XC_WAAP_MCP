@@ -51,7 +51,7 @@ docs.cloud.f5.com).
 | `plan_add_waf_exclusion_rule` | Ajouter une exclusion WAF (faux positif). Les règles qui désactivent tout le WAF sont refusées |
 | `plan_create_object` | Créer un objet sans effet tant qu'il n'est pas référencé : App Firewall, service policy, ip_prefix_set, rate limiter, WAF exclusion policy, health check |
 | `apply_plan(plan_id)` | Applique un plan après confirmation humaine |
-| `plan_revert(plan_id)` | Prépare le retour à l'état d'avant un replace appliqué (si `F5XC_MCP_ROLLBACK_DIR` est défini) ; plan revu comme les autres |
+| `plan_revert(plan_id)` | Prépare le retour à l'état d'avant un replace appliqué (si `F5XC_MCP_ROLLBACK_DIR` est défini) ; plan revu comme les autres, avec l'auteur d'origine ; HIGH RISK si ce n'est pas vous. Les secrets ne sont jamais écrits dans le fichier : ils sont repris de l'objet actuel |
 
 ### Ce que voit la personne qui confirme
 
@@ -118,7 +118,7 @@ python -I scripts/mutate_guards.py . mutation.json  # chaque garde-fou doit êtr
 | `F5XC_MCP_ALLOWED_HOSTS` / `_ORIGINS` | localhost | Valeurs `Host` et `Origin` acceptées (anti DNS rebinding) |
 | `F5XC_MCP_CA_BUNDLE` | — | CA supplémentaire (proxy d'entreprise) ; la vérification TLS ne peut pas être désactivée |
 | `F5XC_MCP_HTTPS_PROXY` | — | Proxy sortant vers XC (`http(s)://hôte:port`, sans identifiants). `HTTPS_PROXY` n'est **pas** lu |
-| `F5XC_MCP_WRITE_KILL_SWITCH` | — | Chemin d'un fichier : tant qu'il existe, toute écriture est refusée (sans redémarrage) |
+| `F5XC_MCP_WRITE_KILL_SWITCH` | — | Chemin d'un fichier : tant qu'il existe, toute écriture est refusée, y compris un `apply_plan` déjà en cours de confirmation (sans redémarrage) |
 | `F5XC_MCP_ROLLBACK_DIR` | — | Répertoire (`0700`) où l'état « avant » de chaque replace appliqué est gardé (`0600`) pour `plan_revert` |
 | `F5XC_MCP_RATE_PER_MINUTE` / `_GLOBAL_RATE_PER_MINUTE` | 60 / 300 | Limites de débit |
 | `F5XC_MCP_MAX_EVENTS`, `_MAX_ITEMS`, `_MAX_QUERY_WINDOW_H` | 100, 200, 168 | Bornes des réponses |
@@ -271,4 +271,6 @@ Réponse à l'audit, preuves et commandes de rejeu : [docs/AUDIT_RESPONSE.md](do
 
 ## Licence
 
-MIT, voir [LICENSE](LICENSE).
+MIT, voir [LICENSE](LICENSE). Le fichier embarqué
+`src/f5xc_waap_mcp/data/public_suffix_list.dat` est la [Public Suffix List](https://publicsuffix.org),
+sous licence MPL-2.0 (en-tête conservé), rafraîchie par `scripts/update_psl.py`.

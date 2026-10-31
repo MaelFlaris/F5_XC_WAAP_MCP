@@ -255,3 +255,120 @@ async def test_F17_banner_has_one_line_per_reason(write_harness, xc):
     assert all("\n" not in r for r in plan["risks"])
     banner = human.messages[0].split("\n\n")[0].split("\n")
     assert banner[0] == "!!! HIGH RISK !!!" and len(banner) == 1 + len(plan["risks"])
+
+
+# --- second review (N1..N5) -------------------------------------------------------------
+async def test_N1_kill_switch_set_during_confirmation_blocks_the_put(tmp_path, xc):
+    kill = tmp_path / "stop-writes"
+    harness = Harness(make_settings(mode="write", enable_writes=True, write_kill_switch=str(kill)), xc)
+    xc.add("GET", FW, replace_form({"monitoring": {}}))
+    xc.add("PUT", FW, {})
+    approve = Human("fw1")
+
+    async def operator_pulls_the_switch(context, params):
+        kill.write_text("")  # set while the human is reading the diff
+        return await approve(context, params)
+
+    _, applied = await plan_then_apply(harness, "plan_set_waf_mode",
+                                       {"namespace": "prod", "name": "fw1", "mode": "blocking"},
+                                       operator_pulls_the_switch)
+    assert "writes_disabled" in error_text(applied)
+    assert puts(xc) == []
+
+
+async def test_N2_rollback_failure_does_not_report_an_applied_change_as_failed(tmp_path, xc):
+    not_a_dir = tmp_path / "file"
+    not_a_dir.write_text("")
+    harness = Harness(make_settings(mode="write", enable_writes=True, rollback_dir=str(not_a_dir / "rb")), xc)
+    xc.add("GET", FW, replace_form({"monitoring": {}}))
+    xc.add("PUT", FW, {})
+    _, applied = await plan_then_apply(harness, "plan_set_waf_mode",
+                                       {"namespace": "prod", "name": "fw1", "mode": "blocking"}, Human("fw1"))
+    data = result_json(applied)["data"]
+    assert data["applied"] is True and data["rollback_available"] is False
+    assert len(puts(xc)) == 1
+    assert [line["event"] for line in harness.audit()].count("rollback_failed") == 1
+
+
+LB_PATH = "/api/config/namespaces/prod/http_loadbalancers/shop"
+SECRET = {"clear_secret_info": {"url": "string:///LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t"}}
+
+
+def _lb_with_cert(waf: dict, secret: dict) -> dict:
+    return {"domains": ["shop.example.com"], **waf,
+            "https": {"tls_cert_params": {"certificates": [{"metadata": {"name": "cert-a"},
+                                                            "private_key": secret}]}}}
+
+
+async def test_N3_rollback_file_holds_no_secret_and_revert_restores_it(tmp_path, xc):
+    harness = Harness(make_settings(mode="write", enable_writes=True, rollback_dir=str(tmp_path / "rb")), xc)
+    live_secret = {"blindfold_secret_info": {"location": "string:///rotated-after-the-change"}}
+    states = [replace_form(_lb_with_cert({"app_firewall": {"name": "fw1", "namespace": "prod"}}, SECRET))]
+    xc.add("GET", LB_PATH, lambda request: httpx.Response(200, json=states[-1]))
+
+    def put(request):
+        spec = json.loads(request.content)["spec"]
+        if len(states) == 1:  # after the first apply, XC rotates the secret
+            spec["https"]["tls_cert_params"]["certificates"][0]["private_key"] = live_secret
+        states.append(replace_form(spec))
+        return httpx.Response(200, json={})
+
+    xc.add("PUT", LB_PATH, put)
+    plan, applied = await plan_then_apply(harness, "plan_set_lb_waf", {"namespace": "prod", "name": "shop"},
+                                          Human("shop"))
+    assert result_json(applied)["data"]["rollback_available"] is True
+    stored = (tmp_path / "rb" / f"{plan['plan_id']}.json").read_text()
+    assert "LS0tLS1" not in stored and "string:///" not in stored and "__f5xc_mcp_secret_kept_in_xc__" in stored
+    _, reverted = await plan_then_apply(harness, "plan_revert", {"plan_id": plan["plan_id"]}, Human("shop"))
+    assert not reverted.isError, reverted.content
+    sent = json.loads(puts(xc)[-1].content)["spec"]
+    assert sent["https"]["tls_cert_params"]["certificates"][0]["private_key"] == live_secret
+    assert sent["app_firewall"] == {"name": "fw1", "namespace": "prod"} and "disable_waf" not in sent
+
+
+async def test_N3_revert_refused_when_secret_cannot_be_matched(tmp_path, xc):
+    from f5xc_waap_mcp.tools.changes import SECRET_MARKER, restore_secrets
+    stored = {"certs": [{"key": SECRET_MARKER}, {"key": SECRET_MARKER}]}
+    with pytest.raises(SecureError) as exc:
+        restore_secrets(stored, {"certs": [{"key": {"x": 1}}]})  # list changed, no names
+    assert exc.value.code is Code.ROLLBACK_UNAVAILABLE
+    with pytest.raises(SecureError):
+        restore_secrets({"private_key": SECRET_MARKER}, {})  # secret gone
+
+
+async def test_N4_reverting_someone_elses_change_names_the_author_and_is_high_risk(tmp_path, xc):
+    harness = Harness(make_settings(mode="write", enable_writes=True, rollback_dir=str(tmp_path / "rb")), xc)
+    states = [replace_form({"monitoring": {}})]
+    xc.add("GET", FW, lambda request: httpx.Response(200, json=states[-1]))
+    xc.add("PUT", FW, lambda request: (states.append(replace_form(json.loads(request.content)["spec"])),
+                                       httpx.Response(200, json={}))[1])
+    plan, _ = await plan_then_apply(harness, "plan_set_waf_mode",
+                                    {"namespace": "prod", "name": "fw1", "mode": "blocking"}, Human("fw1"))
+    record = tmp_path / "rb" / f"{plan['plan_id']}.json"
+    own = result_json(await harness.call("plan_revert", {"plan_id": plan["plan_id"]}))["data"]
+    assert "applied by alice@example.com" in own["summary"]
+    assert not any("another user" in r for r in own["risks"])
+    data = json.loads(record.read_text())
+    data.update(user="bob@example.com", user_uuid="uuid-bob")
+    record.write_text(json.dumps(data))
+    other = result_json(await harness.call("plan_revert", {"plan_id": plan["plan_id"]}))["data"]
+    assert "applied by bob@example.com" in other["summary"]
+    assert "reverts a change applied by another user (bob@example.com)" in other["risks"]
+
+
+@pytest.mark.parametrize(("domain", "public"), [
+    ("gouv.fr", True), ("github.io", True), ("co.uk", True), ("com", True), ("com.au", True),
+    ("anything.ck", True), ("www.ck", False), ("ministere.gouv.fr", False), ("shop.example.com", False),
+    ("example.com", False), ("", True),
+])
+def test_N5_public_suffix_list(domain, public):
+    from f5xc_waap_mcp.psl import is_public_suffix
+    assert is_public_suffix(domain) is public
+
+
+def test_N5_exclusion_on_public_suffix_is_high_risk():
+    from f5xc_waap_mcp.tools.changes import exclusion_rule_risks
+    rule = {"metadata": {"name": "r"}, "suffix_value": "gouv.fr", "path_prefix": "/api",
+            "app_firewall_detection_control": {"exclude_signature_contexts": [{"signature_id": 200001234}]}}
+    assert any("public suffix" in r for r in exclusion_rule_risks(rule))
+    assert exclusion_rule_risks({**rule, "suffix_value": "ministere.gouv.fr"}) == []

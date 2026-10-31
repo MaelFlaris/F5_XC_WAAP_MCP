@@ -55,6 +55,10 @@ _SECRET_KEY = re.compile(
 _DROP_KEYS = frozenset({"create_form", "replace_form", "status", "owner_view", "object"})
 
 
+def is_secret_key(name: str) -> bool:
+    return bool(_SECRET_KEY.search(name))
+
+
 def text(value: Any, limit: int = MAX_TEXT) -> str:
     """Single-line, bounded, control-free version of an untrusted string."""
     if value is None:

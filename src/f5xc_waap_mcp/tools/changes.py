@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from .. import catalog, sanitize
 from ..errors import Code, SecureError
 from ..plans import Plan, canonical_hash, diff, render
+from ..psl import is_public_suffix
 from ..runtime import Runtime, ToolClass
 from .common import XC_NAME, Namespace, ObjectName
 
@@ -123,7 +124,7 @@ def _exclusion_rules(node: Any, out: list[dict[str, Any]] | None = None) -> list
 
 
 MAX_PRECISE_SIGNATURES = 5
-_PLAIN = re.compile(r"[A-Za-z0-9_.\-/\[\]]{1,120}")
+_PLAIN = re.compile(r"[A-Za-z0-9_.\-/\[\]@+]{1,120}")  # e-mails stay readable
 
 
 def shown(value: Any) -> str:
@@ -152,12 +153,9 @@ def exclusion_rule_risks(rule: dict[str, Any]) -> list[str]:
     if isinstance(prefix, str) and prefix.strip("/") == "":
         reasons.append(f"{label} path prefix {shown(prefix)} covers every path")
     suffix = rule.get("suffix_value")
-    if isinstance(suffix, str):
-        labels = [part for part in suffix.strip(".").split(".") if part]
-        # One label ("com") is a TLD; two short labels ("co.uk", "com.au") are
-        # usually a public suffix. No public suffix list is shipped: heuristic.
-        if len(labels) < 2 or (len(labels) == 2 and all(len(part) <= 3 for part in labels)):
-            reasons.append(f"{label} domain suffix {shown(suffix)} covers a whole TLD or public suffix")
+    # Public Suffix List (ICANN + private sections): "com", "gouv.fr", "co.uk", "github.io"...
+    if isinstance(suffix, str) and is_public_suffix(suffix):
+        reasons.append(f"{label} domain suffix {shown(suffix)} is a public suffix (sites of unrelated owners)")
     exact = rule.get("exact_value")
     if isinstance(exact, str) and "*" in exact:
         reasons.append(f"{label} domain {shown(exact)} contains a wildcard")
@@ -199,10 +197,13 @@ def assess_risks(kind: str, before: dict[str, Any], after: dict[str, Any], ops: 
 
 
 def register(mcp: FastMCP, rt: Runtime) -> None:
-    def writable(kind_name: str, namespace: str) -> catalog.Kind:
+    def ensure_writes_enabled() -> None:
         kill = rt.settings.write_kill_switch
         if kill and os.path.exists(kill):
             raise SecureError(Code.WRITES_DISABLED)
+
+    def writable(kind_name: str, namespace: str) -> catalog.Kind:
+        ensure_writes_enabled()
         rt.require_namespace(namespace, write=True)
         k = catalog.kind(kind_name)
         if not k.writable:
@@ -497,6 +498,8 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
                 _, _, latest = await current(k, plan.namespace, plan.name)
                 if latest != plan.base_version:
                     raise SecureError(Code.PLAN_STALE)
+            # The kill switch may have been set while the human was reading the diff.
+            ensure_writes_enabled()
             await rt.xc(plan.method, plan.path, body=plan.body)
         except SecureError as exc:
             status, error = "error", str(exc.code)
@@ -506,7 +509,12 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
             rt.audit_event("plan_applied", plan_id=plan.plan_id, operation=plan.operation, kind=plan.kind,
                            namespace=plan.namespace, target=plan.name, body_sha256=plan.body_sha256,
                            method=plan.method, path=plan.path, status=status, error_code=error)
-        rollback = save_rollback(plan)
+        try:
+            rollback = save_rollback(plan)
+        except (OSError, TypeError, ValueError) as exc:
+            # The change IS applied in XC: never report it as failed (the model would retry).
+            rollback = False
+            rt.audit_event("rollback_failed", plan_id=plan.plan_id, detail=type(exc).__name__)
         return sanitize.envelope("apply_plan", {"applied": True, "plan_id": plan.plan_id, "operation": plan.operation,
                                                 "kind": plan.kind, "namespace": plan.namespace, "name": plan.name,
                                                 "body_sha256": plan.body_sha256, "summary": plan.summary,
@@ -522,9 +530,12 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         if path is None or plan.operation != "replace" or plan.before is None:
             return False
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Secrets never go to disk: they are replaced by a marker and taken back from the
+        # live object at revert time (the plan tools never change secret fields).
         record = {"plan_id": plan.plan_id, "applied_at": time.time(), "user": rt.identity().principal.user,
+                  "user_uuid": rt.identity().principal.user_uuid,
                   "kind": plan.kind, "namespace": plan.namespace, "name": plan.name,
-                  "body_sha256": plan.body_sha256, "before_spec": plan.before}
+                  "body_sha256": plan.body_sha256, "before_spec": strip_secrets(plan.before)}
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(record, handle, sort_keys=True)
@@ -545,10 +556,77 @@ def register(mcp: FastMCP, rt: Runtime) -> None:
         record = json.loads(path.read_text(encoding="utf-8"))
         k = writable(record["kind"], record["namespace"])
         metadata, before, version = await current(k, record["namespace"], record["name"])
-        rt.annotate(reverts=plan_id)
+        after = restore_secrets(record["before_spec"], before)
+        author = shown(record.get("user", "?"))
+        applied_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(record.get("applied_at", 0))))
+        extra = []
+        if record.get("user_uuid") != rt.identity().principal.user_uuid:
+            extra.append(f"reverts a change applied by another user ({author})")
+        rt.annotate(reverts=plan_id, reverted_author=record.get("user"))
         return make_plan(k=k, operation="replace", namespace=record["namespace"], name=record["name"],
-                         metadata=metadata, before=before, after=record["before_spec"], version=version,
-                         summary=f"REVERT {plan_id} on {record['kind']} {record['name']}")
+                         metadata=metadata, before=before, after=after, version=version,
+                         summary=f"REVERT {plan_id} (applied by {author} at {applied_at}) on "
+                                 f"{record['kind']} {record['name']}", extra_risks=extra)
+
+
+SECRET_MARKER = {"__f5xc_mcp_secret_kept_in_xc__": True}
+
+
+def strip_secrets(node: Any) -> Any:
+    """Copy of a spec with every secret replaced by SECRET_MARKER (lossless otherwise)."""
+    if isinstance(node, dict):
+        return {k: SECRET_MARKER if sanitize.is_secret_key(str(k)) else strip_secrets(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [strip_secrets(v) for v in node]
+    if isinstance(node, str) and (node.startswith("string:///") or "-----BEGIN" in node):
+        return SECRET_MARKER
+    return node
+
+
+def _named(item: Any) -> str | None:
+    if isinstance(item, dict):
+        meta = item.get("metadata")
+        name = meta.get("name") if isinstance(meta, dict) else item.get("name")
+        return name if isinstance(name, str) else None
+    return None
+
+
+def restore_secrets(stored: Any, live: Any) -> Any:
+    """Put back the secrets of the live object where the record has SECRET_MARKER.
+    Refuses when a secret's position cannot be matched unambiguously (a wrong pairing
+    would attach one certificate's key to another)."""
+    if stored == SECRET_MARKER:
+        if live is None or live == SECRET_MARKER:
+            raise SecureError(Code.ROLLBACK_UNAVAILABLE, "A secret of the saved state no longer exists.")
+        return live
+    if isinstance(stored, dict):
+        live_dict = live if isinstance(live, dict) else {}
+        return {k: restore_secrets(v, live_dict.get(k)) for k, v in stored.items()}
+    if isinstance(stored, list):
+        live_list = live if isinstance(live, list) else []
+        by_name = {_named(i): i for i in live_list if _named(i) is not None}
+        out = []
+        for index, item in enumerate(stored):
+            if not _contains_marker(item):
+                out.append(item)
+            elif _named(item) is not None and _named(item) in by_name:
+                out.append(restore_secrets(item, by_name[_named(item)]))
+            elif len(live_list) == len(stored):
+                out.append(restore_secrets(item, live_list[index]))
+            else:
+                raise SecureError(Code.ROLLBACK_UNAVAILABLE, "A secret moved since the change; revert by hand.")
+        return out
+    return stored
+
+
+def _contains_marker(node: Any) -> bool:
+    if node == SECRET_MARKER:
+        return True
+    if isinstance(node, dict):
+        return any(_contains_marker(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_contains_marker(v) for v in node)
+    return False
 
 
 def confirmation_message(plan: Plan) -> str:
